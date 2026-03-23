@@ -2,7 +2,7 @@
 
 A web-based interactive simulator for visualizing, designing, and experimenting with distributed system architectures. Built with Next.js, React, Zustand, and Tailwind CSS.
 
-![img](./views/dashboard.png)
+![img](./views/sys_design_sim.gif)
 
 ## Features
 
