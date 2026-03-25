@@ -77,6 +77,87 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
       rpsPerShard: 800,
     },
   },
+  {
+    type: 'cloud_storage',
+    label: 'Cloud Storage',
+    icon: '◫',
+    color: '#38bdf8',
+    description: 'Object storage buckets',
+    defaults: {
+      storageThroughputMbps: 1000,
+      objectSizeKb: 512,
+      storageClass: 'standard',
+      storageGb: 1000,
+    },
+  },
+  {
+    type: 'pubsub',
+    label: 'Pub/Sub',
+    icon: '⊕',
+    color: '#fb923c',
+    description: 'Async message bus',
+    defaults: {
+      partitions: 4,
+      messageRetentionHours: 24,
+      maxMessageSizeKb: 10,
+    },
+  },
+  {
+    type: 'cloud_function',
+    label: 'Cloud Function',
+    icon: 'ƒ',
+    color: '#a78bfa',
+    description: 'Serverless compute',
+    defaults: {
+      functionMemoryMb: 256,
+      maxConcurrency: 100,
+      avgExecutionMs: 200,
+    },
+  },
+  {
+    type: 'cron_job',
+    label: 'Cron Job',
+    icon: '◷',
+    color: '#34d399',
+    description: 'Schedule-driven task emitter',
+    defaults: {
+      intervalMinutes: 5,
+      tasksPerRun: 100,
+    },
+  },
+  {
+    type: 'traffic_generator',
+    label: 'Traffic Generator',
+    icon: '↯',
+    color: '#f43f5e',
+    description: 'Injects traffic at a configurable RPS',
+    defaults: {
+      generatorRps: 1000,
+      generatorPattern: 'steady',
+    },
+  },
+  {
+    type: 'comment',
+    label: 'Comment',
+    icon: '//',
+    color: '#f59e0b',
+    description: 'Annotation node — no simulation effect',
+    defaults: {
+      commentBody: '',
+    },
+  },
+  {
+    type: 'worker_pool',
+    label: 'Worker Pool',
+    icon: '⚙',
+    color: '#facc15',
+    description: 'Parallel task processing pool',
+    defaults: {
+      workerCount: 4,
+      threadCount: 4,
+      taskDurationMs: 500,
+    },
+  },
 ];
 
 export const COMPONENT_BY_TYPE: Record<ComponentType, ComponentDefinition> =

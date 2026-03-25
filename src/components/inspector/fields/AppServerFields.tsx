@@ -3,9 +3,9 @@
 import { useArchitectureStore } from '@/store/architectureStore';
 
 const inputStyle: React.CSSProperties = {
-  background: '#05070b',
-  border: '1px solid #172030',
-  color: '#b0c8e0',
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
   borderRadius: '4px',
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
@@ -28,7 +28,7 @@ const selectStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '9px',
-  color: '#a1b3bf',
+  color: 'var(--text-dim)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   fontWeight: 600,
@@ -43,7 +43,7 @@ const fieldStyle: React.CSSProperties = {
 const sliderValueStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
-  color: '#00ff88',
+  color: 'var(--accent-green)',
   fontWeight: 600,
 };
 
@@ -68,7 +68,7 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
             max={16}
             value={instances}
             onChange={(e) => updateNodeConfig(nodeId, { instances: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#00ff88', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }}
           />
           <span style={sliderValueStyle}>{instances}</span>
         </div>
@@ -78,9 +78,9 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
             flexWrap: 'wrap',
             gap: '3px',
             padding: '6px',
-            background: '#05070b',
+            background: 'var(--bg-base)',
             borderRadius: '4px',
-            border: '1px solid #172030',
+            border: '1px solid var(--border)',
           }}
         >
           {Array.from({ length: 16 }).map((_, i) => (
@@ -91,7 +91,7 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
                 width: '10px',
                 height: '10px',
                 borderRadius: '2px',
-                background: i < instances ? '#00ff88' : '#172030',
+                background: i < instances ? 'var(--accent-green)' : 'var(--border)',
                 transition: 'background 0.1s ease',
               }}
             />
@@ -145,7 +145,7 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
             max={500}
             value={config.avgLatencyMs ?? 40}
             onChange={(e) => updateNodeConfig(nodeId, { avgLatencyMs: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#00ff88', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }}
           />
           <span style={sliderValueStyle}>{config.avgLatencyMs ?? 40}ms</span>
         </div>

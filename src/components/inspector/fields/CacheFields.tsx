@@ -4,9 +4,9 @@ import { useArchitectureStore } from '@/store/architectureStore';
 import type { NodeConfig } from '@/types';
 
 const inputStyle: React.CSSProperties = {
-  background: '#05070b',
-  border: '1px solid #172030',
-  color: '#b0c8e0',
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
   borderRadius: '4px',
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
@@ -29,7 +29,7 @@ const selectStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '9px',
-  color: '#a1b3bf',
+  color: 'var(--text-dim)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   fontWeight: 600,
@@ -55,7 +55,7 @@ interface ToggleProps {
   color?: string;
 }
 
-function Toggle({ value, onChange, color = '#ff8833' }: ToggleProps) {
+function Toggle({ value, onChange, color = 'var(--accent-orange)' }: ToggleProps) {
   return (
     <button
       onClick={() => onChange(!value)}
@@ -69,7 +69,7 @@ function Toggle({ value, onChange, color = '#ff8833' }: ToggleProps) {
         padding: 0,
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '11px',
-        color: value ? color : '#a1b3bf',
+        color: value ? color : 'var(--text-dim)',
       }}
     >
       <span
@@ -78,10 +78,10 @@ function Toggle({ value, onChange, color = '#ff8833' }: ToggleProps) {
           width: '28px',
           height: '15px',
           borderRadius: '8px',
-          background: value ? color : '#172030',
+          background: value ? color : 'var(--border)',
           position: 'relative',
           transition: 'background 0.15s ease',
-          border: `1px solid ${value ? color : '#a1b3bf'}`,
+          border: `1px solid ${value ? color : 'var(--text-dim)'}`,
           flexShrink: 0,
         }}
       >
@@ -93,7 +93,7 @@ function Toggle({ value, onChange, color = '#ff8833' }: ToggleProps) {
             width: '9px',
             height: '9px',
             borderRadius: '50%',
-            background: value ? '#05070b' : '#a1b3bf',
+            background: value ? 'var(--bg-base)' : 'var(--text-dim)',
             transition: 'left 0.15s ease',
           }}
         />
@@ -132,13 +132,13 @@ export default function CacheFields({ nodeId }: CacheFieldsProps) {
             max={64}
             value={config.memoryGb ?? 8}
             onChange={(e) => updateNodeConfig(nodeId, { memoryGb: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#ff8833', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-orange)', cursor: 'pointer' }}
           />
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '11px',
-              color: '#ff8833',
+              color: 'var(--accent-orange)',
               fontWeight: 600,
               minWidth: '36px',
             }}

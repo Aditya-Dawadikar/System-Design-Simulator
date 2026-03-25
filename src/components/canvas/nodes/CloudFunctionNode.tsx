@@ -6,8 +6,8 @@ import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import type { NodeStatus } from '@/types';
 
-const COLOR = '#ff8833';
-const ICON = '⚡';
+const COLOR = '#a78bfa';
+const ICON = 'ƒ';
 
 function getStatusFromLoad(load: number, failed: boolean): NodeStatus {
   if (failed) return 'failed';
@@ -34,41 +34,33 @@ const STATUS_LABELS: Record<NodeStatus, string> = {
   idle: 'IDLE',
 };
 
-function getBorderColor(status: NodeStatus): string {
-  if (status === 'idle' || status === 'ok') return COLOR;
-  return STATUS_COLORS[status];
-}
-
 function fmtRps(rps: number): string {
   return rps >= 1000 ? `${(rps / 1000).toFixed(1)}k` : rps.toFixed(0);
 }
 
-export default memo(function CacheNode({ id, selected }: NodeProps) {
+export default memo(function CloudFunctionNode({ id, selected }: NodeProps) {
   const config = useArchitectureStore((s) => s.nodeConfigs[id]);
   const running = useSimulationStore((s) => s.running);
   const metrics = useSimulationStore((s) => s.nodeMetrics[id]);
 
-  const label = config?.label ?? 'Redis Cache';
-  const memoryGb = config?.memoryGb ?? 8;
-  const ttlSeconds = config?.ttlSeconds ?? 60;
-  const evictionPolicy = config?.evictionPolicy ?? 'lru';
+  const label = config?.label ?? 'Cloud Function';
+  const concurrency = config?.maxConcurrency ?? 100;
+  const execMs = config?.avgExecutionMs ?? 200;
+  const memMb = config?.functionMemoryMb ?? 256;
+  const memFactor = Math.sqrt(memMb / 256);
+  const capacity = Math.round(concurrency * (1000 / execMs) * memFactor);
 
   const status = running && metrics
     ? getStatusFromLoad(metrics.load, metrics.failed)
     : 'idle';
 
-  const borderColor = getBorderColor(status);
+  const borderColor = (status === 'idle' || status === 'ok') ? COLOR : STATUS_COLORS[status];
   const statusColor = STATUS_COLORS[status];
   const boxShadow = selected
     ? `0 0 0 2px ${COLOR}44, 0 0 20px ${COLOR}33`
     : status !== 'idle'
     ? `0 0 12px ${borderColor}22`
     : 'none';
-
-  // Hit rate is approximated from inverse of load — high load means high usage / high hit rate potential
-  const hitRate = running && metrics
-    ? Math.min(0.95, Math.max(0, 1 - metrics.load * 0.3))
-    : null;
 
   return (
     <div
@@ -88,13 +80,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Top}
-        style={{
-          background: COLOR,
-          border: '2px solid var(--bg-panel)',
-          width: 10,
-          height: 10,
-          top: -6,
-        }}
+        style={{ background: COLOR, border: '2px solid var(--bg-panel)', width: 10, height: 10, top: -6 }}
       />
 
       {/* Header */}
@@ -108,7 +94,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <span style={{ fontSize: 15, color: COLOR, lineHeight: 1 }}>{ICON}</span>
+          <span style={{ fontSize: 17, color: COLOR, lineHeight: 1, fontStyle: 'italic' }}>{ICON}</span>
           <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', letterSpacing: '0.02em' }}>
             {label}
           </span>
@@ -134,7 +120,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       {/* Config summary */}
       <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
         <span style={{ color: 'var(--text-dim)' }}>
-          {memoryGb}GB · {ttlSeconds}s TTL · {evictionPolicy.toUpperCase()}
+          {concurrency} conc · {memMb}MB · {fmtRps(capacity)} cap
         </span>
       </div>
 
@@ -149,27 +135,27 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
           }}
         >
           <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>HIT RATE</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
-              {hitRate !== null ? `${Math.round(hitRate * 100)}%` : '—'}
-            </div>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
-              {fmtRps(metrics.rpsIn)}
-            </div>
-          </div>
-          <div>
             <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
               {Math.round(metrics.load * 100)}%
             </div>
           </div>
           <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LAT</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>EXEC TIME</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
               {metrics.latencyMs.toFixed(0)}ms
+            </div>
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>INVOC/S</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+              {fmtRps(metrics.rpsIn)}
+            </div>
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>P99</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: metrics.p99LatencyMs > 2000 ? 'var(--accent-red)' : 'var(--text)' }}>
+              {metrics.p99LatencyMs.toFixed(0)}ms
             </div>
           </div>
         </div>
@@ -178,13 +164,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{
-          background: COLOR,
-          border: '2px solid var(--bg-panel)',
-          width: 10,
-          height: 10,
-          bottom: -6,
-        }}
+        style={{ background: COLOR, border: '2px solid var(--bg-panel)', width: 10, height: 10, bottom: -6 }}
       />
     </div>
   );

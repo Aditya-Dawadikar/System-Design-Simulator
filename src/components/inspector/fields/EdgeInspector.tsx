@@ -5,9 +5,9 @@ import { DEFAULT_EDGE_CONFIG } from '@/constants/components';
 import type { EdgeConfig } from '@/types';
 
 const inputStyle: React.CSSProperties = {
-  background: '#05070b',
-  border: '1px solid #172030',
-  color: '#b0c8e0',
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
   borderRadius: '4px',
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
@@ -30,7 +30,7 @@ const selectStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '9px',
-  color: '#a1b3bf',
+  color: 'var(--text-dim)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   fontWeight: 600,
@@ -43,14 +43,14 @@ const fieldStyle: React.CSSProperties = {
 };
 
 const dividerStyle: React.CSSProperties = {
-  borderTop: '1px solid #172030',
+  borderTop: '1px solid var(--border)',
   margin: '16px 0',
 };
 
 const subFieldStyle: React.CSSProperties = {
   marginBottom: '12px',
   paddingLeft: '10px',
-  borderLeft: '2px solid #172030',
+  borderLeft: '2px solid var(--border)',
 };
 
 type Protocol = EdgeConfig['protocol'];
@@ -62,7 +62,7 @@ interface ToggleProps {
   color?: string;
 }
 
-function Toggle({ value, onChange, color = '#00ddff' }: ToggleProps) {
+function Toggle({ value, onChange, color = 'var(--accent-cyan)' }: ToggleProps) {
   return (
     <button
       onClick={() => onChange(!value)}
@@ -76,7 +76,7 @@ function Toggle({ value, onChange, color = '#00ddff' }: ToggleProps) {
         padding: 0,
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '11px',
-        color: value ? color : '#a1b3bf',
+        color: value ? color : 'var(--text-dim)',
       }}
     >
       <span
@@ -85,10 +85,10 @@ function Toggle({ value, onChange, color = '#00ddff' }: ToggleProps) {
           width: '28px',
           height: '15px',
           borderRadius: '8px',
-          background: value ? color : '#172030',
+          background: value ? color : 'var(--border)',
           position: 'relative',
           transition: 'background 0.15s ease',
-          border: `1px solid ${value ? color : '#a1b3bf'}`,
+          border: `1px solid ${value ? color : 'var(--text-dim)'}`,
           flexShrink: 0,
         }}
       >
@@ -100,7 +100,7 @@ function Toggle({ value, onChange, color = '#00ddff' }: ToggleProps) {
             width: '9px',
             height: '9px',
             borderRadius: '50%',
-            background: value ? '#05070b' : '#a1b3bf',
+            background: value ? 'var(--bg-base)' : 'var(--text-dim)',
             transition: 'left 0.15s ease',
           }}
         />
@@ -153,13 +153,13 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
             max={5}
             value={config.retryCount}
             onChange={(e) => updateEdgeConfig(edgeId, { retryCount: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#00ddff', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }}
           />
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '11px',
-              color: '#00ddff',
+              color: 'var(--accent-cyan)',
               fontWeight: 600,
               minWidth: '12px',
             }}
@@ -176,7 +176,7 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
         <Toggle
           value={config.circuitBreaker}
           onChange={(v) => updateEdgeConfig(edgeId, { circuitBreaker: v })}
-          color="#ff3355"
+          color="var(--accent-red)"
         />
       </div>
 
@@ -201,13 +201,13 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
                 onChange={(e) =>
                   updateEdgeConfig(edgeId, { circuitBreakerThreshold: Number(e.target.value) })
                 }
-                style={{ flex: 1, accentColor: '#ff3355', cursor: 'pointer' }}
+                style={{ flex: 1, accentColor: 'var(--accent-red)', cursor: 'pointer' }}
               />
               <span
                 style={{
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: '11px',
-                  color: '#ff3355',
+                  color: 'var(--accent-red)',
                   fontWeight: 600,
                   minWidth: '32px',
                 }}
@@ -227,7 +227,7 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
           <span
             style={{
               marginLeft: '6px',
-              color: '#a1b3bf',
+              color: 'var(--text-dim)',
               fontSize: '9px',
               fontWeight: 400,
             }}
@@ -243,6 +243,75 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
           style={inputStyle}
         />
       </div>
+
+      <div style={dividerStyle} />
+
+      {/* Traffic split */}
+      <div style={fieldStyle}>
+        <label style={labelStyle}>Traffic Split</label>
+        <Toggle
+          value={config.splitPct !== undefined}
+          onChange={(v) =>
+            updateEdgeConfig(edgeId, { splitPct: v ? 100 : undefined })
+          }
+          color="var(--accent-yellow)"
+        />
+      </div>
+
+      {config.splitPct !== undefined && (
+        <div
+          style={{
+            background: 'rgba(234,179,8,0.04)',
+            border: '1px solid rgba(234,179,8,0.18)',
+            borderRadius: '4px',
+            padding: '10px',
+            marginBottom: '14px',
+          }}
+        >
+          <div style={subFieldStyle}>
+            <label style={labelStyle}>
+              Split %
+              <span style={{ marginLeft: '8px', color: 'var(--accent-yellow)', fontWeight: 500, fontSize: '9px' }}>
+                {config.splitPct}% of upstream output
+              </span>
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={config.splitPct}
+                onChange={(e) =>
+                  updateEdgeConfig(edgeId, { splitPct: Number(e.target.value) })
+                }
+                style={{ flex: 1, accentColor: 'var(--accent-yellow)', cursor: 'pointer' }}
+              />
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '11px',
+                  color: 'var(--accent-yellow)',
+                  fontWeight: 600,
+                  minWidth: '36px',
+                }}
+              >
+                {config.splitPct}%
+              </span>
+            </div>
+          </div>
+          <div
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '9px',
+              color: 'var(--text-dim)',
+              lineHeight: 1.5,
+              paddingLeft: '10px',
+            }}
+          >
+            Edges without an explicit split % share the remaining traffic equally.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

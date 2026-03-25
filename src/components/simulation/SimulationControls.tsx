@@ -67,8 +67,8 @@ export default function SimulationControls() {
         alignItems: 'center',
         gap: '12px',
         padding: '8px 16px',
-        background: '#0b1016',
-        borderBottom: '1px solid #172030',
+        background: 'var(--bg-panel)',
+        borderBottom: '1px solid var(--border)',
         flexWrap: 'nowrap',
         minHeight: '44px',
         fontFamily: "'JetBrains Mono', monospace",
@@ -85,8 +85,8 @@ export default function SimulationControls() {
           padding: '5px 14px',
           border: 'none',
           borderRadius: '4px',
-          background: running ? '#ff3355' : '#00ff88',
-          color: '#05070b',
+          background: running ? 'var(--accent-red)' : 'var(--accent-green)',
+          color: 'var(--bg-base)',
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '11px',
           fontWeight: '700',
@@ -108,9 +108,9 @@ export default function SimulationControls() {
         value={pattern}
         onChange={handlePattern}
         style={{
-          background: '#05070b',
-          color: '#b0c8e0',
-          border: '1px solid #172030',
+          background: 'var(--bg-base)',
+          color: 'var(--text)',
+          border: '1px solid var(--border)',
           borderRadius: '4px',
           padding: '4px 8px',
           fontFamily: "'JetBrains Mono', monospace",
@@ -138,7 +138,7 @@ export default function SimulationControls() {
         style={{
           width: '1px',
           height: '20px',
-          background: '#172030',
+          background: 'var(--border)',
           flexShrink: 0,
         }}
       />
@@ -146,7 +146,7 @@ export default function SimulationControls() {
       {/* Peak RPS label */}
       <span
         style={{
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           fontSize: '10px',
           letterSpacing: '0.08em',
           flexShrink: 0,
@@ -168,7 +168,7 @@ export default function SimulationControls() {
           flex: '1 1 120px',
           minWidth: '80px',
           maxWidth: '240px',
-          accentColor: '#00ddff',
+          accentColor: 'var(--accent-cyan)',
           cursor: 'pointer',
         }}
       />
@@ -176,7 +176,7 @@ export default function SimulationControls() {
       {/* RPS value display */}
       <span
         style={{
-          color: '#00ddff',
+          color: 'var(--accent-cyan)',
           fontSize: '12px',
           fontWeight: '600',
           minWidth: '60px',
@@ -199,10 +199,10 @@ export default function SimulationControls() {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '5px 10px',
-          border: '1px solid #172030',
+          border: '1px solid var(--border)',
           borderRadius: '4px',
           background: 'transparent',
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '14px',
           cursor: 'pointer',
@@ -210,12 +210,12 @@ export default function SimulationControls() {
           transition: 'color 0.15s, border-color 0.15s',
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = '#b0c8e0';
-          (e.currentTarget as HTMLButtonElement).style.borderColor = '#a1b3bf';
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)';
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--text-dim)';
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = '#a1b3bf';
-          (e.currentTarget as HTMLButtonElement).style.borderColor = '#172030';
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
+          (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
         }}
       >
         ↺

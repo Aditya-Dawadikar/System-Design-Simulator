@@ -6,8 +6,8 @@ import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import type { NodeStatus } from '@/types';
 
-const COLOR = '#ff8833';
-const ICON = '⚡';
+const COLOR = '#fb923c';
+const ICON = '⊕';
 
 function getStatusFromLoad(load: number, failed: boolean): NodeStatus {
   if (failed) return 'failed';
@@ -34,41 +34,30 @@ const STATUS_LABELS: Record<NodeStatus, string> = {
   idle: 'IDLE',
 };
 
-function getBorderColor(status: NodeStatus): string {
-  if (status === 'idle' || status === 'ok') return COLOR;
-  return STATUS_COLORS[status];
-}
-
 function fmtRps(rps: number): string {
   return rps >= 1000 ? `${(rps / 1000).toFixed(1)}k` : rps.toFixed(0);
 }
 
-export default memo(function CacheNode({ id, selected }: NodeProps) {
+export default memo(function PubSubNode({ id, selected }: NodeProps) {
   const config = useArchitectureStore((s) => s.nodeConfigs[id]);
   const running = useSimulationStore((s) => s.running);
   const metrics = useSimulationStore((s) => s.nodeMetrics[id]);
 
-  const label = config?.label ?? 'Redis Cache';
-  const memoryGb = config?.memoryGb ?? 8;
-  const ttlSeconds = config?.ttlSeconds ?? 60;
-  const evictionPolicy = config?.evictionPolicy ?? 'lru';
+  const label = config?.label ?? 'Pub/Sub';
+  const partitions = config?.partitions ?? 4;
+  const capacity = partitions * 5000;
 
   const status = running && metrics
     ? getStatusFromLoad(metrics.load, metrics.failed)
     : 'idle';
 
-  const borderColor = getBorderColor(status);
+  const borderColor = (status === 'idle' || status === 'ok') ? COLOR : STATUS_COLORS[status];
   const statusColor = STATUS_COLORS[status];
   const boxShadow = selected
     ? `0 0 0 2px ${COLOR}44, 0 0 20px ${COLOR}33`
     : status !== 'idle'
     ? `0 0 12px ${borderColor}22`
     : 'none';
-
-  // Hit rate is approximated from inverse of load — high load means high usage / high hit rate potential
-  const hitRate = running && metrics
-    ? Math.min(0.95, Math.max(0, 1 - metrics.load * 0.3))
-    : null;
 
   return (
     <div
@@ -88,13 +77,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Top}
-        style={{
-          background: COLOR,
-          border: '2px solid var(--bg-panel)',
-          width: 10,
-          height: 10,
-          top: -6,
-        }}
+        style={{ background: COLOR, border: '2px solid var(--bg-panel)', width: 10, height: 10, top: -6 }}
       />
 
       {/* Header */}
@@ -134,7 +117,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       {/* Config summary */}
       <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
         <span style={{ color: 'var(--text-dim)' }}>
-          {memoryGb}GB · {ttlSeconds}s TTL · {evictionPolicy.toUpperCase()}
+          {partitions} partitions · {fmtRps(capacity)} cap
         </span>
       </div>
 
@@ -149,27 +132,27 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
           }}
         >
           <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>HIT RATE</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
-              {hitRate !== null ? `${Math.round(hitRate * 100)}%` : '—'}
-            </div>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
-              {fmtRps(metrics.rpsIn)}
-            </div>
-          </div>
-          <div>
             <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
               {Math.round(metrics.load * 100)}%
             </div>
           </div>
           <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LAT</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LAG</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
               {metrics.latencyMs.toFixed(0)}ms
+            </div>
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>MSG/S IN</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+              {fmtRps(metrics.rpsIn)}
+            </div>
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>MSG/S OUT</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+              {fmtRps(metrics.rpsOut)}
             </div>
           </div>
         </div>
@@ -178,13 +161,7 @@ export default memo(function CacheNode({ id, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
-        style={{
-          background: COLOR,
-          border: '2px solid var(--bg-panel)',
-          width: 10,
-          height: 10,
-          bottom: -6,
-        }}
+        style={{ background: COLOR, border: '2px solid var(--bg-panel)', width: 10, height: 10, bottom: -6 }}
       />
     </div>
   );

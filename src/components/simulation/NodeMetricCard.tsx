@@ -22,11 +22,11 @@ function formatMs(ms: number): string {
 }
 
 function getStatusLabel(load: number, failed: boolean): { label: string; color: string } {
-  if (failed || load > 1.05) return { label: 'FAILED',    color: '#ff3355' };
-  if (load > 0.9)             return { label: 'CRITICAL',  color: '#ff3355' };
-  if (load > 0.75)            return { label: 'STRESSED',  color: '#ff8833' };
-  if (load > 0.0)             return { label: 'OK',        color: '#00ff88' };
-  return                             { label: 'IDLE',      color: '#a1b3bf' };
+  if (failed || load > 1.05) return { label: 'FAILED',    color: 'var(--accent-red)' };
+  if (load > 0.9)             return { label: 'CRITICAL',  color: 'var(--accent-red)' };
+  if (load > 0.75)            return { label: 'STRESSED',  color: 'var(--accent-orange)' };
+  if (load > 0.0)             return { label: 'OK',        color: 'var(--accent-green)' };
+  return                             { label: 'IDLE',      color: 'var(--text-dim)' };
 }
 
 export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
@@ -40,7 +40,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
   const type      = (node.type ?? 'app_server') as ComponentType;
   const def       = COMPONENT_BY_TYPE[type];
   const label     = config?.label ?? def?.label ?? nodeId;
-  const color     = def?.color ?? '#b0c8e0';
+  const color     = def?.color ?? 'var(--text)';
   const icon      = def?.icon ?? '?';
 
   const load      = metrics?.load      ?? 0;
@@ -54,7 +54,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
   const status    = getStatusLabel(load, failed);
   const stressed  = load > 0.8;
 
-  const borderColor = stressed ? color : '#172030';
+  const borderColor = stressed ? color : 'var(--border)';
 
   return (
     <>
@@ -76,7 +76,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
           minWidth: '160px',
           maxWidth: '190px',
           flexShrink: 0,
-          background: '#0b1016',
+          background: 'var(--bg-panel)',
           border: `1px solid ${borderColor}`,
           borderRadius: '6px',
           padding: '10px 12px',
@@ -108,7 +108,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
             <span style={{ color, fontSize: '14px', flexShrink: 0 }}>{icon}</span>
             <span
               style={{
-                color: '#b0c8e0',
+                color: 'var(--text)',
                 fontSize: '10px',
                 fontWeight: '600',
                 letterSpacing: '0.04em',
@@ -137,7 +137,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
         </div>
 
         {/* Divider */}
-        <div style={{ height: '1px', background: '#172030' }} />
+        <div style={{ height: '1px', background: 'var(--border)' }} />
 
         {/* Arc gauge — centered */}
         <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '2px' }}>
@@ -152,8 +152,8 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
             gap: '4px',
           }}
         >
-          <StatCell label="RPS IN"  value={formatRps(rpsIn)}  color="#b0c8e0" />
-          <StatCell label="RPS OUT" value={formatRps(rpsOut)} color="#b0c8e0" />
+          <StatCell label="RPS IN"  value={formatRps(rpsIn)}  color="var(--text)" />
+          <StatCell label="RPS OUT" value={formatRps(rpsOut)} color="var(--text)" />
         </div>
 
         {/* Latency row */}
@@ -164,8 +164,8 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
             gap: '4px',
           }}
         >
-          <StatCell label="LAT"  value={formatMs(latencyMs)} color="#00ddff" />
-          <StatCell label="P99"  value={formatMs(p99)}       color="#bb66ff" />
+          <StatCell label="LAT"  value={formatMs(latencyMs)} color="var(--accent-cyan)" />
+          <StatCell label="P99"  value={formatMs(p99)}       color="var(--accent-purple)" />
         </div>
 
         {/* Error rate */}
@@ -176,14 +176,14 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
             justifyContent: 'space-between',
           }}
         >
-          <span style={{ color: '#a1b3bf', fontSize: '9px', letterSpacing: '0.06em' }}>
+          <span style={{ color: 'var(--text-dim)', fontSize: '9px', letterSpacing: '0.06em' }}>
             ERR RATE
           </span>
           <span
             style={{
               fontSize: '11px',
               fontWeight: '600',
-              color: errorRate > 0.05 ? '#ff3355' : '#a1b3bf',
+              color: errorRate > 0.05 ? 'var(--accent-red)' : 'var(--text-dim)',
             }}
           >
             {(errorRate * 100).toFixed(1)}%
@@ -222,7 +222,7 @@ function StatCell({
         flex: 1,
       }}
     >
-      <span style={{ color: '#a1b3bf', fontSize: '9px', letterSpacing: '0.06em' }}>
+      <span style={{ color: 'var(--text-dim)', fontSize: '9px', letterSpacing: '0.06em' }}>
         {label}
       </span>
       <span style={{ color, fontSize: '11px', fontWeight: '600' }}>{value}</span>

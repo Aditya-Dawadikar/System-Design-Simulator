@@ -27,6 +27,13 @@ import LoadBalancerNode from './nodes/LoadBalancerNode';
 import AppServerNode from './nodes/AppServerNode';
 import CacheNode from './nodes/CacheNode';
 import DatabaseNode from './nodes/DatabaseNode';
+import CloudStorageNode from './nodes/CloudStorageNode';
+import PubSubNode from './nodes/PubSubNode';
+import CloudFunctionNode from './nodes/CloudFunctionNode';
+import CronJobNode from './nodes/CronJobNode';
+import WorkerPoolNode from './nodes/WorkerPoolNode';
+import CommentNode from './nodes/CommentNode';
+import TrafficGeneratorNode from './nodes/TrafficGeneratorNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -37,6 +44,13 @@ export const nodeTypes: NodeTypes = {
   app_server: AppServerNode,
   cache: CacheNode,
   database: DatabaseNode,
+  cloud_storage: CloudStorageNode,
+  pubsub: PubSubNode,
+  cloud_function: CloudFunctionNode,
+  cron_job: CronJobNode,
+  worker_pool: WorkerPoolNode,
+  comment: CommentNode,
+  traffic_generator: TrafficGeneratorNode,
 };
 
 export const edgeTypes: EdgeTypes = {
@@ -200,7 +214,7 @@ export default function Canvas() {
   return (
     <div
       ref={wrapperRef}
-      style={{ width: '100%', height: '100%', position: 'relative', background: '#05070b' }}
+      style={{ width: '100%', height: '100%', position: 'relative', background: 'var(--bg-base)' }}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -227,7 +241,7 @@ export default function Canvas() {
       >
         <Background
           variant={BackgroundVariant.Dots}
-          color="#172030"
+          color="var(--border)"
           gap={24}
           size={1}
         />
@@ -246,8 +260,8 @@ export default function Canvas() {
             position: 'absolute',
             top: contextMenu.y,
             left: contextMenu.x,
-            background: '#0b1016',
-            border: '1px solid #172030',
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
             borderRadius: 6,
             padding: '4px 0',
             zIndex: 1000,
@@ -268,19 +282,19 @@ export default function Canvas() {
                   padding: '7px 14px',
                   background: 'none',
                   border: 'none',
-                  color: '#b0c8e0',
+                  color: 'var(--text)',
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: 'inherit',
                   fontSize: 12,
                   letterSpacing: '0.02em',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#172030'; }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--border)'; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
               >
                 Duplicate
               </button>
-              <div style={{ height: 1, background: '#172030', margin: '2px 0' }} />
+              <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
               <button
                 onClick={handleDeleteNode}
                 style={{
@@ -289,14 +303,14 @@ export default function Canvas() {
                   padding: '7px 14px',
                   background: 'none',
                   border: 'none',
-                  color: '#ff3355',
+                  color: 'var(--accent-red)',
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: 'inherit',
                   fontSize: 12,
                   letterSpacing: '0.02em',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#ff335518'; }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--accent-red) 10%, transparent)'; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
               >
                 Delete
@@ -312,14 +326,14 @@ export default function Canvas() {
                 padding: '7px 14px',
                 background: 'none',
                 border: 'none',
-                color: '#ff3355',
+                color: 'var(--accent-red)',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontFamily: 'inherit',
                 fontSize: 12,
                 letterSpacing: '0.02em',
               }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#ff335518'; }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in srgb, var(--accent-red) 10%, transparent)'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
             >
               Delete Edge

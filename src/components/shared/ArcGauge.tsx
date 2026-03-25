@@ -7,10 +7,10 @@ interface ArcGaugeProps {
 }
 
 function resolveColor(value: number, baseColor: string): string {
-  if (value > 1.0) return '#ff3355';
-  if (value > 0.8) return '#ff8833';
-  if (value > 0.5) return '#ffcc00';
-  if (value >= 0) return '#00ff88';
+  if (value > 1.0) return 'var(--accent-red)';
+  if (value > 0.8) return 'var(--accent-orange)';
+  if (value > 0.5) return 'var(--accent-yellow)';
+  if (value >= 0) return 'var(--accent-green)';
   return baseColor;
 }
 
@@ -43,7 +43,7 @@ export default function ArcGauge({ value, color, size = 64 }: ArcGaugeProps) {
   // Foreground arc: 180° → angle based on clamped value
   const clamped = Math.min(value, 1.0);
   const sweepDeg = clamped * 180;
-  const fgAngleDeg = 180 - sweepDeg;
+  const fgAngleDeg = 180 + sweepDeg;
 
   const fgStart = toCartesian(180);
   const fgEnd = toCartesian(fgAngleDeg);
@@ -64,7 +64,7 @@ export default function ArcGauge({ value, color, size = 64 }: ArcGaugeProps) {
       <path
         d={bgPath}
         fill="none"
-        stroke="#172030"
+        stroke="var(--border)"
         strokeWidth={strokeWidth}
         strokeLinecap="round"
       />

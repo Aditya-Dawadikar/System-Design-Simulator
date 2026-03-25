@@ -4,9 +4,9 @@ import { useArchitectureStore } from '@/store/architectureStore';
 import type { NodeConfig } from '@/types';
 
 const inputStyle: React.CSSProperties = {
-  background: '#05070b',
-  border: '1px solid #172030',
-  color: '#b0c8e0',
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
   borderRadius: '4px',
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
@@ -29,7 +29,7 @@ const selectStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '9px',
-  color: '#a1b3bf',
+  color: 'var(--text-dim)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   fontWeight: 600,
@@ -79,7 +79,7 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
           <span
             style={{
               marginLeft: '8px',
-              color: '#bb66ff',
+              color: 'var(--accent-purple)',
               fontWeight: 500,
               fontSize: '9px',
             }}
@@ -94,13 +94,13 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
             max={8}
             value={shards}
             onChange={(e) => updateNodeConfig(nodeId, { shards: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#bb66ff', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '11px',
-              color: '#bb66ff',
+              color: 'var(--accent-purple)',
               fontWeight: 600,
               minWidth: '12px',
             }}
@@ -119,13 +119,13 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
             max={4}
             value={config.readReplicas ?? 0}
             onChange={(e) => updateNodeConfig(nodeId, { readReplicas: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#bb66ff', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '11px',
-              color: '#bb66ff',
+              color: 'var(--accent-purple)',
               fontWeight: 600,
               minWidth: '12px',
             }}
@@ -156,13 +156,13 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
             max={10000}
             value={config.storageGb ?? 100}
             onChange={(e) => updateNodeConfig(nodeId, { storageGb: Number(e.target.value) })}
-            style={{ flex: 1, accentColor: '#bb66ff', cursor: 'pointer' }}
+            style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
           <span
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '11px',
-              color: '#bb66ff',
+              color: 'var(--accent-purple)',
               fontWeight: 600,
               minWidth: '48px',
               textAlign: 'right',

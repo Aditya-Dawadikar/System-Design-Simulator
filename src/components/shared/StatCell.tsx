@@ -20,7 +20,7 @@ export default function StatCell({ label, value, unit, highlight = false }: Stat
       <span
         style={{
           fontSize: '9px',
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
           fontWeight: 500,
@@ -32,7 +32,7 @@ export default function StatCell({ label, value, unit, highlight = false }: Stat
         style={{
           fontSize: '13px',
           fontWeight: 700,
-          color: highlight ? '#00ddff' : '#b0c8e0',
+          color: highlight ? 'var(--accent-cyan)' : 'var(--text)',
           lineHeight: 1,
         }}
       >
@@ -42,7 +42,7 @@ export default function StatCell({ label, value, unit, highlight = false }: Stat
             style={{
               fontSize: '9px',
               fontWeight: 500,
-              color: '#a1b3bf',
+              color: 'var(--text-dim)',
               marginLeft: '2px',
             }}
           >

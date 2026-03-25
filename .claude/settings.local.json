@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npm init:*)",
       "Bash(node -e \"const fs=require\\(''fs''\\);const p=JSON.parse\\(fs.readFileSync\\(''package.json''\\)\\);p.name=''system-design-simulator'';fs.writeFileSync\\(''package.json'',JSON.stringify\\(p,null,2\\)\\);\")",
-      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)"
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)",
+      "Bash(xargs grep:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

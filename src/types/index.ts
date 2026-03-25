@@ -3,7 +3,14 @@ export type ComponentType =
   | 'load_balancer'
   | 'app_server'
   | 'cache'
-  | 'database';
+  | 'database'
+  | 'cloud_storage'
+  | 'pubsub'
+  | 'cloud_function'
+  | 'cron_job'
+  | 'worker_pool'
+  | 'comment'
+  | 'traffic_generator';
 
 export type TrafficPattern = 'steady' | 'ramp' | 'spike' | 'wave' | 'chaos';
 
@@ -60,6 +67,30 @@ export interface NodeConfig {
   shards?: number;
   rpsPerShard?: number;
   engine?: 'PostgreSQL' | 'MySQL' | 'MongoDB' | 'Redis' | 'Cassandra';
+  // Cloud Storage
+  storageThroughputMbps?: number;
+  objectSizeKb?: number;
+  storageClass?: 'standard' | 'nearline' | 'coldline' | 'archive';
+  // Pub/Sub
+  partitions?: number;
+  messageRetentionHours?: number;
+  maxMessageSizeKb?: number;
+  // Cloud Function
+  functionMemoryMb?: number;
+  maxConcurrency?: number;
+  avgExecutionMs?: number;
+  // Cron Job (schedule-driven source node)
+  intervalMinutes?: number;   // how often the job fires
+  tasksPerRun?: number;       // tasks generated each run
+  // Worker Pool
+  workerCount?: number;       // number of worker processes
+  threadCount?: number;       // threads per worker
+  taskDurationMs?: number;    // time a single thread takes per task (ms)
+  // Comment / Annotation
+  commentBody?: string;
+  // Traffic Generator
+  generatorRps?: number;
+  generatorPattern?: TrafficPattern;
 }
 
 export interface EdgeConfig {
@@ -69,6 +100,7 @@ export interface EdgeConfig {
   circuitBreaker: boolean;
   circuitBreakerThreshold: number;
   bandwidthMbps: number;
+  splitPct?: number; // 0-100; undefined = auto equal-split
 }
 
 export interface LogEvent {

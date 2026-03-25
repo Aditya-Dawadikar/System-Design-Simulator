@@ -73,7 +73,7 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
     const { nodes, edges, nodeConfigs, edgeConfigs } = useArchitectureStore.getState();
 
     const currentRps = peakRps * getTrafficMultiplier(pattern, tick);
-    const result = runSimulationTick({ nodes, edges, nodeConfigs, edgeConfigs }, currentRps);
+    const result = runSimulationTick({ nodes, edges, nodeConfigs, edgeConfigs }, currentRps, tick);
 
     // Update history (last 40 points)
     const newHistory: Record<string, number[]> = {};

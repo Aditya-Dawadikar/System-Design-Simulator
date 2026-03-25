@@ -12,10 +12,10 @@ const LEVEL_ICON: Record<LogEvent['level'], string> = {
 };
 
 const LEVEL_COLOR: Record<LogEvent['level'], string> = {
-  info:  '#b0c8e0',
-  warn:  '#ffcc00',
-  error: '#ff3355',
-  k8s:   '#00ddff',
+  info:  'var(--text)',
+  warn:  'var(--accent-yellow)',
+  error: 'var(--accent-red)',
+  k8s:   'var(--accent-cyan)',
 };
 
 export default function EventLog() {
@@ -33,21 +33,15 @@ export default function EventLog() {
   return (
     <div
       style={{
-        maxHeight: '80px',
-        overflowY: 'auto',
-        padding: '4px 16px',
-        background: '#05070b',
-        borderTop: '1px solid #172030',
+        padding: '4px 16px 12px',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: '11px',
-        scrollbarWidth: 'thin',
-        scrollbarColor: '#172030 transparent',
       }}
     >
       {isEmpty && !running ? (
         <div
           style={{
-            color: '#a1b3bf',
+            color: 'var(--text-dim)',
             padding: '8px 0',
             letterSpacing: '0.04em',
           }}
@@ -70,7 +64,7 @@ export default function EventLog() {
             {/* Timestamp */}
             <span
               style={{
-                color: '#a1b3bf',
+                color: 'var(--text-dim)',
                 flexShrink: 0,
                 minWidth: '52px',
                 letterSpacing: '0.03em',

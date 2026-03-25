@@ -8,7 +8,56 @@ import LoadBalancerFields from './fields/LoadBalancerFields';
 import AppServerFields from './fields/AppServerFields';
 import CacheFields from './fields/CacheFields';
 import DatabaseFields from './fields/DatabaseFields';
+import CloudStorageFields from './fields/CloudStorageFields';
+import PubSubFields from './fields/PubSubFields';
+import CloudFunctionFields from './fields/CloudFunctionFields';
+import CronJobFields from './fields/CronJobFields';
+import WorkerPoolFields from './fields/WorkerPoolFields';
+import CommentFields from './fields/CommentFields';
+import TrafficGeneratorFields from './fields/TrafficGeneratorFields';
 import EdgeInspector from './fields/EdgeInspector';
+
+function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
+  const config = useArchitectureStore((s) => s.nodeConfigs[nodeId] ?? {});
+  const updateNodeConfig = useArchitectureStore((s) => s.updateNodeConfig);
+  return (
+    <div style={{ marginBottom: '14px' }}>
+      <label
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '9px',
+          color: 'var(--text-dim)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          fontWeight: 600,
+          display: 'block',
+          marginBottom: '5px',
+        }}
+      >
+        {label}
+      </label>
+      <input
+        type="text"
+        value={config.label ?? ''}
+        onChange={(e) => updateNodeConfig(nodeId, { label: e.target.value })}
+        placeholder="Custom name…"
+        style={{
+          background: 'var(--bg-base)',
+          border: '1px solid var(--border)',
+          color: 'var(--text)',
+          borderRadius: '4px',
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '11px',
+          padding: '5px 8px',
+          width: '100%',
+          boxSizing: 'border-box',
+          outline: 'none',
+        }}
+        spellCheck={false}
+      />
+    </div>
+  );
+}
 
 function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
   switch (type) {
@@ -22,6 +71,20 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <CacheFields nodeId={nodeId} />;
     case 'database':
       return <DatabaseFields nodeId={nodeId} />;
+    case 'cloud_storage':
+      return <CloudStorageFields nodeId={nodeId} />;
+    case 'pubsub':
+      return <PubSubFields nodeId={nodeId} />;
+    case 'cloud_function':
+      return <CloudFunctionFields nodeId={nodeId} />;
+    case 'cron_job':
+      return <CronJobFields nodeId={nodeId} />;
+    case 'worker_pool':
+      return <WorkerPoolFields nodeId={nodeId} />;
+    case 'comment':
+      return <CommentFields nodeId={nodeId} />;
+    case 'traffic_generator':
+      return <TrafficGeneratorFields nodeId={nodeId} />;
     default:
       return null;
   }
@@ -42,7 +105,7 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
     <div
       style={{
         padding: '12px 14px',
-        borderBottom: '1px solid #172030',
+        borderBottom: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
         gap: '6px',
@@ -52,7 +115,7 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
         <span
           style={{
             fontSize: '16px',
-            color: def?.color ?? '#b0c8e0',
+            color: def?.color ?? 'var(--text)',
             lineHeight: 1,
           }}
         >
@@ -63,7 +126,7 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '12px',
             fontWeight: 700,
-            color: '#b0c8e0',
+            color: 'var(--text)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -78,9 +141,9 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '9px',
           fontWeight: 600,
-          color: def?.color ?? '#b0c8e0',
-          background: `${def?.color ?? '#b0c8e0'}18`,
-          border: `1px solid ${def?.color ?? '#b0c8e0'}30`,
+          color: def?.color ?? 'var(--text)',
+          background: `${def?.color ?? 'var(--text)'}18`,
+          border: `1px solid ${def?.color ?? 'var(--text)'}30`,
           borderRadius: '3px',
           padding: '2px 6px',
           alignSelf: 'flex-start',
@@ -102,20 +165,20 @@ function EdgeHeader({ edgeId }: { edgeId: string }) {
     <div
       style={{
         padding: '12px 14px',
-        borderBottom: '1px solid #172030',
+        borderBottom: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
         gap: '6px',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '14px', color: '#00ddff', lineHeight: 1 }}>⇢</span>
+        <span style={{ fontSize: '14px', color: 'var(--accent-cyan)', lineHeight: 1 }}>⇢</span>
         <span
           style={{
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '12px',
             fontWeight: 700,
-            color: '#b0c8e0',
+            color: 'var(--text)',
           }}
         >
           Connection
@@ -126,7 +189,7 @@ function EdgeHeader({ edgeId }: { edgeId: string }) {
           style={{
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '9px',
-            color: '#a1b3bf',
+            color: 'var(--text-dim)',
             letterSpacing: '0.04em',
           }}
         >
@@ -138,9 +201,9 @@ function EdgeHeader({ edgeId }: { edgeId: string }) {
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '9px',
           fontWeight: 600,
-          color: '#00ddff',
-          background: '#00ddff18',
-          border: '1px solid #00ddff30',
+          color: 'var(--accent-cyan)',
+          background: 'color-mix(in srgb, var(--accent-cyan) 9%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-cyan) 19%, transparent)',
           borderRadius: '3px',
           padding: '2px 6px',
           alignSelf: 'flex-start',
@@ -167,8 +230,8 @@ export default function Inspector() {
         width: '260px',
         minWidth: '260px',
         height: '100%',
-        background: '#0b1016',
-        borderLeft: '1px solid #172030',
+        background: 'var(--bg-panel)',
+        borderLeft: '1px solid var(--border)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -177,7 +240,7 @@ export default function Inspector() {
       <div
         style={{
           padding: '14px 14px 10px',
-          borderBottom: '1px solid #172030',
+          borderBottom: '1px solid var(--border)',
         }}
       >
         <span
@@ -185,7 +248,7 @@ export default function Inspector() {
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '9px',
             fontWeight: 700,
-            color: '#a1b3bf',
+            color: 'var(--text-dim)',
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
           }}
@@ -211,7 +274,7 @@ export default function Inspector() {
             style={{
               fontFamily: "'JetBrains Mono', monospace",
               fontSize: '10px',
-              color: '#a1b3bf',
+              color: 'var(--text-dim)',
               textAlign: 'center',
               lineHeight: 1.6,
             }}
@@ -227,10 +290,17 @@ export default function Inspector() {
           <div
             style={{
               flex: 1,
+              minHeight: 0,
               overflowY: 'auto',
               padding: '14px',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'var(--border) transparent',
             }}
           >
+            <NodeNameField
+              nodeId={selectedNodeId}
+              label={selectedNode.type === 'comment' ? 'Title' : 'Name'}
+            />
             <NodeFields nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
           </div>
         </>
@@ -242,8 +312,11 @@ export default function Inspector() {
           <div
             style={{
               flex: 1,
+              minHeight: 0,
               overflowY: 'auto',
               padding: '14px',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'var(--border) transparent',
             }}
           >
             <EdgeInspector edgeId={selectedEdgeId} />

@@ -11,7 +11,7 @@ import { useSimulationStore } from '@/store/simulationStore';
 import { COMPONENT_BY_TYPE } from '@/constants/components';
 import type { ComponentType } from '@/types';
 
-const INACTIVE_COLOR = '#a1b3bf';
+const INACTIVE_COLOR = 'var(--text-dim)';
 
 function getAnimDuration(rps: number): string {
   if (rps >= 10000) return '0.4s';
@@ -47,7 +47,7 @@ export default memo(function EdgeWire({
 
   let edgeColor: string;
   if (isBottleneck) {
-    edgeColor = '#ff3355';
+    edgeColor = 'var(--accent-red)';
   } else if (running && sourceColor) {
     edgeColor = sourceColor;
   } else {
@@ -137,7 +137,7 @@ export default memo(function EdgeWire({
         >
           <div
             style={{
-              background: '#0b1016',
+              background: 'var(--bg-panel)',
               border: `1px solid ${edgeColor}55`,
               borderRadius: 4,
               padding: '2px 6px',

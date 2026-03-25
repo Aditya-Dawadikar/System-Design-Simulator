@@ -1,7 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
-:root {
+
+:root,
+.theme-dark {
   --bg-base:      #05070b;
   --bg-panel:     #0b1016;
   --border:       #172030;
@@ -16,9 +18,25 @@
   --text-dim:     #7f919d;
 }
 
+.theme-light {
+  --bg-base:      #f7fafd;
+  --bg-panel:     #ffffff;
+  --border:       #e2e8f0;
+  --accent-green: #10b981;
+  --accent-cyan:  #06b6d4;
+  --accent-yellow:#f59e42;
+  --accent-red:   #ef4444;
+  --accent-purple:#a78bfa;
+  --accent-orange:#fb923c;
+  --accent-pink:  #ec4899;
+  --text:         #1e293b;
+  --text-dim:     #64748b;
+}
+
 * {
   box-sizing: border-box;
 }
+
 
 html, body {
   margin: 0;
@@ -28,6 +46,7 @@ html, body {
   font-family: 'JetBrains Mono', monospace;
   height: 100%;
   overflow: hidden;
+  transition: background 0.2s, color 0.2s;
 }
 
 #__next {

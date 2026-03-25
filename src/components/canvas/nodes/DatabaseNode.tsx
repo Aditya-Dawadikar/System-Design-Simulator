@@ -19,11 +19,11 @@ function getStatusFromLoad(load: number, failed: boolean): NodeStatus {
 }
 
 const STATUS_COLORS: Record<NodeStatus, string> = {
-  ok: '#00ff88',
-  stressed: '#ffcc00',
-  critical: '#ff8833',
-  failed: '#ff3355',
-  idle: '#a1b3bf',
+  ok: 'var(--accent-green)',
+  stressed: 'var(--accent-yellow)',
+  critical: 'var(--accent-orange)',
+  failed: 'var(--accent-red)',
+  idle: 'var(--text-dim)',
 };
 
 const STATUS_LABELS: Record<NodeStatus, string> = {
@@ -79,12 +79,12 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
     <div
       style={{
         width: 208,
-        background: '#0b1016',
+        background: 'var(--bg-panel)',
         border: `1.5px solid ${borderColor}`,
         borderRadius: 8,
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
-        color: '#b0c8e0',
+        color: 'var(--text)',
         boxShadow,
         transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
@@ -95,7 +95,7 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
         position={Position.Top}
         style={{
           background: COLOR,
-          border: '2px solid #0b1016',
+          border: '2px solid var(--bg-panel)',
           width: 10,
           height: 10,
           top: -6,
@@ -109,12 +109,12 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 12px 8px',
-          borderBottom: '1px solid #172030',
+          borderBottom: '1px solid var(--border)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{ fontSize: 15, color: COLOR, lineHeight: 1 }}>{ICON}</span>
-          <span style={{ fontWeight: 600, fontSize: 12, color: '#e0f0ff', letterSpacing: '0.02em' }}>
+          <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', letterSpacing: '0.02em' }}>
             {label}
           </span>
         </div>
@@ -137,8 +137,8 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
       </div>
 
       {/* Config summary */}
-      <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid #172030' : 'none' }}>
-        <span style={{ color: '#a1b3bf' }}>
+      <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
+        <span style={{ color: 'var(--text-dim)' }}>
           {engine} · {shards}s · {readReplicas}r
         </span>
       </div>
@@ -154,30 +154,30 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
           }}
         >
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>CONNS</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>CONNS</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
               {connections !== null ? connections : '—'}
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>LOAD/SHARD</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD/SHARD</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
               {loadPerShard !== null ? `${Math.round(loadPerShard * 100)}%` : '—'}
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>RPS</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: '#b0c8e0' }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
               {fmtRps(metrics.rpsIn)}
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>LAT</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LAT</span>
             <div
               style={{
                 fontWeight: 600,
                 fontSize: 12,
-                color: metrics.latencyMs > 100 ? '#ffcc00' : '#b0c8e0',
+                color: metrics.latencyMs > 100 ? 'var(--accent-yellow)' : 'var(--text)',
               }}
             >
               {metrics.latencyMs.toFixed(0)}ms
@@ -191,7 +191,7 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
         position={Position.Bottom}
         style={{
           background: COLOR,
-          border: '2px solid #0b1016',
+          border: '2px solid var(--bg-panel)',
           width: 10,
           height: 10,
           bottom: -6,

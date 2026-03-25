@@ -3,9 +3,9 @@
 import { useArchitectureStore } from '@/store/architectureStore';
 
 const inputStyle: React.CSSProperties = {
-  background: '#05070b',
-  border: '1px solid #172030',
-  color: '#b0c8e0',
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
   borderRadius: '4px',
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
@@ -18,7 +18,7 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '9px',
-  color: '#a1b3bf',
+  color: 'var(--text-dim)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   fontWeight: 600,
@@ -33,7 +33,7 @@ const fieldStyle: React.CSSProperties = {
 const sliderValueStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: '11px',
-  color: '#00ddff',
+  color: 'var(--accent-cyan)',
   fontWeight: 600,
 };
 
@@ -46,7 +46,7 @@ interface SliderProps {
   unit?: string;
 }
 
-function Slider({ min, max, value, onChange, color = '#00ddff', unit = '' }: SliderProps) {
+function Slider({ min, max, value, onChange, color = 'var(--accent-cyan)', unit = '' }: SliderProps) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
       <input
@@ -91,7 +91,7 @@ export default function CdnFields({ nodeId }: CdnFieldsProps) {
           max={4}
           value={config.pops ?? 2}
           onChange={(v) => updateNodeConfig(nodeId, { pops: v })}
-          color="#00ddff"
+          color="var(--accent-cyan)"
         />
       </div>
 
@@ -102,7 +102,7 @@ export default function CdnFields({ nodeId }: CdnFieldsProps) {
           max={100}
           value={config.cacheablePct ?? 60}
           onChange={(v) => updateNodeConfig(nodeId, { cacheablePct: v })}
-          color="#00ddff"
+          color="var(--accent-cyan)"
           unit="%"
         />
       </div>

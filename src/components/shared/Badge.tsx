@@ -7,11 +7,11 @@ interface BadgeProps {
 }
 
 const STATUS_CONFIG: Record<NodeStatus, { color: string; label: string }> = {
-  idle:     { color: '#a1b3bf', label: 'IDLE' },
-  ok:       { color: '#00ff88', label: 'OK' },
-  stressed: { color: '#ffcc00', label: 'STRESSED' },
-  critical: { color: '#ff8833', label: 'CRITICAL' },
-  failed:   { color: '#ff3355', label: 'FAILED' },
+  idle:     { color: 'var(--text-dim)', label: 'IDLE' },
+  ok:       { color: 'var(--accent-green)', label: 'OK' },
+  stressed: { color: 'var(--accent-yellow)', label: 'STRESSED' },
+  critical: { color: 'var(--accent-orange)', label: 'CRITICAL' },
+  failed:   { color: 'var(--accent-red)', label: 'FAILED' },
 };
 
 export default function Badge({ status }: BadgeProps) {

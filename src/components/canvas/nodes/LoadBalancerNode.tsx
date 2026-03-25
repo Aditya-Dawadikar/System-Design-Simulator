@@ -19,11 +19,11 @@ function getStatusFromLoad(load: number, failed: boolean): NodeStatus {
 }
 
 const STATUS_COLORS: Record<NodeStatus, string> = {
-  ok: '#00ff88',
-  stressed: '#ffcc00',
-  critical: '#ff8833',
-  failed: '#ff3355',
-  idle: '#a1b3bf',
+  ok: 'var(--accent-green)',
+  stressed: 'var(--accent-yellow)',
+  critical: 'var(--accent-orange)',
+  failed: 'var(--accent-red)',
+  idle: 'var(--text-dim)',
 };
 
 const STATUS_LABELS: Record<NodeStatus, string> = {
@@ -77,12 +77,12 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
     <div
       style={{
         width: 208,
-        background: '#0b1016',
+        background: 'var(--bg-panel)',
         border: `1.5px solid ${borderColor}`,
         borderRadius: 8,
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
-        color: '#b0c8e0',
+        color: 'var(--text)',
         boxShadow,
         transition: 'border-color 0.3s, box-shadow 0.3s',
         position: 'relative',
@@ -93,7 +93,7 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
         position={Position.Top}
         style={{
           background: COLOR,
-          border: '2px solid #0b1016',
+          border: '2px solid var(--bg-panel)',
           width: 10,
           height: 10,
           top: -6,
@@ -107,12 +107,12 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 12px 8px',
-          borderBottom: '1px solid #172030',
+          borderBottom: '1px solid var(--border)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <span style={{ fontSize: 15, color: COLOR, lineHeight: 1 }}>{ICON}</span>
-          <span style={{ fontWeight: 600, fontSize: 12, color: '#e0f0ff', letterSpacing: '0.02em' }}>
+          <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', letterSpacing: '0.02em' }}>
             {label}
           </span>
         </div>
@@ -135,8 +135,8 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
       </div>
 
       {/* Config summary */}
-      <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid #172030' : 'none' }}>
-        <span style={{ color: '#a1b3bf' }}>
+      <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
+        <span style={{ color: 'var(--text-dim)' }}>
           {ALGO_SHORT[algorithm] ?? algorithm} · {maxConnStr} max conn
         </span>
       </div>
@@ -152,7 +152,7 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
           }}
         >
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>RPS IN</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS IN</span>
             <div style={{ color: COLOR, fontWeight: 600, fontSize: 12 }}>
               {metrics.rpsIn >= 1000
                 ? `${(metrics.rpsIn / 1000).toFixed(1)}k`
@@ -160,26 +160,26 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>LOAD</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
               {Math.round(metrics.load * 100)}%
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>ERR%</span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>ERR%</span>
             <div
               style={{
                 fontWeight: 600,
                 fontSize: 12,
-                color: metrics.errorRate > 0 ? '#ff3355' : '#a1b3bf',
+                color: metrics.errorRate > 0 ? 'var(--accent-red)' : 'var(--text-dim)',
               }}
             >
               {(metrics.errorRate * 100).toFixed(1)}%
             </div>
           </div>
           <div>
-            <span style={{ color: '#a1b3bf', fontSize: 10 }}>RPS OUT</span>
-            <div style={{ color: '#b0c8e0', fontWeight: 600, fontSize: 12 }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS OUT</span>
+            <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 12 }}>
               {metrics.rpsOut >= 1000
                 ? `${(metrics.rpsOut / 1000).toFixed(1)}k`
                 : metrics.rpsOut.toFixed(0)}
@@ -193,7 +193,7 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
         position={Position.Bottom}
         style={{
           background: COLOR,
-          border: '2px solid #0b1016',
+          border: '2px solid var(--bg-panel)',
           width: 10,
           height: 10,
           bottom: -6,

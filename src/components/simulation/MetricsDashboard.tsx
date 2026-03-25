@@ -58,10 +58,10 @@ function computeGlobalMetrics(
 }
 
 const STATUS_COLOR: Record<SystemStatus, string> = {
-  HEALTHY:  '#00ff88',
-  DEGRADED: '#ffcc00',
-  CRITICAL: '#ff8833',
-  FAILED:   '#ff3355',
+  HEALTHY:  'var(--accent-green)',
+  DEGRADED: 'var(--accent-yellow)',
+  CRITICAL: 'var(--accent-orange)',
+  FAILED:   'var(--accent-red)',
 };
 
 function formatRps(rps: number): string {
@@ -88,14 +88,13 @@ export default function MetricsDashboard() {
   return (
     <div
       style={{
-        height: '300px',
+        height: '100%',
         display: 'flex',
         flexDirection: 'row',
-        background: '#0b1016',
-        borderTop: '1px solid #172030',
+        background: 'var(--bg-panel)',
+        borderTop: '1px solid var(--border)',
         fontFamily: "'JetBrains Mono', monospace",
         overflow: 'hidden',
-        flexShrink: 0,
       }}
     >
       {/* ── Left: Charts and node cards ── */}
@@ -105,7 +104,7 @@ export default function MetricsDashboard() {
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,
-          borderRight: '1px solid #172030',
+          borderRight: '1px solid var(--border)',
           height: '100%',
         }}
       >
@@ -117,26 +116,26 @@ export default function MetricsDashboard() {
           style={{
             display: 'flex',
             gap: '0',
-            borderBottom: '1px solid #172030',
+            borderBottom: '1px solid var(--border)',
             flexShrink: 0,
           }}
         >
           <GlobalStat
             label="LIVE RPS"
             value={formatRps(global.liveRps)}
-            color="#00ddff"
+            color="var(--accent-cyan)"
             separator
           />
           <GlobalStat
             label="E2E LAT"
             value={formatMs(global.e2eLatencyMs)}
-            color="#bb66ff"
+            color="var(--accent-purple)"
             separator
           />
           <GlobalStat
             label="ERR RATE"
             value={`${(global.errRate * 100).toFixed(1)}%`}
-            color={global.errRate > 0.05 ? '#ff3355' : '#b0c8e0'}
+            color={global.errRate > 0.05 ? 'var(--accent-red)' : 'var(--text)'}
             separator
           />
           <GlobalStat
@@ -155,10 +154,10 @@ export default function MetricsDashboard() {
           padding: '0 16px',
           display: 'flex',
           alignItems: 'center',
-          borderBottom: '1px solid #172030',
+          borderBottom: '1px solid var(--border)',
         }}>
-          <span style={{ color: '#38505f', fontSize: 11, marginRight: 12, minWidth: 60 }}>TRAFFIC</span>
-          <Sparkline data={globalRpsHistory} color="#00ddff" width={320} height={28} />
+          <span style={{ color: 'var(--border)', fontSize: 11, marginRight: 12, minWidth: 60 }}>TRAFFIC</span>
+          <Sparkline data={globalRpsHistory} color="var(--accent-cyan)" width={320} height={28} />
         </div>
 
         {/* Per-node cards, vertically scrollable */}
@@ -172,14 +171,14 @@ export default function MetricsDashboard() {
             gap: '8px',
             padding: '8px 16px',
             scrollbarWidth: 'thin',
-            scrollbarColor: '#172030 transparent',
+            scrollbarColor: 'var(--border) transparent',
             minHeight: 0,
           }}
         >
           {nodes.length === 0 ? (
             <div
               style={{
-                color: '#a1b3bf',
+                color: 'var(--text-dim)',
                 fontSize: '11px',
                 margin: 'auto 0',
                 alignSelf: 'center',
@@ -206,14 +205,14 @@ export default function MetricsDashboard() {
       >
         <div style={{
           fontSize: 11,
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           padding: '6px 12px',
-          borderBottom: '1px solid #172030',
+          borderBottom: '1px solid var(--border)',
           letterSpacing: '0.04em',
         }}>
           EVENT LOG
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: '#05070b' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg-base)' }}>
           <EventLog />
         </div>
       </div>
@@ -245,14 +244,14 @@ function GlobalStat({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '6px 12px',
-        borderRight: separator ? '1px solid #172030' : 'none',
+        borderRight: separator ? '1px solid var(--border)' : 'none',
         gap: '2px',
         minWidth: '80px',
       }}
     >
       <span
         style={{
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           fontSize: '9px',
           letterSpacing: '0.08em',
           fontWeight: '600',

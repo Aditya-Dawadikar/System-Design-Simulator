@@ -22,8 +22,8 @@ export default function ComponentItem({ definition }: ComponentItemProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        border: `1px solid ${hovered ? definition.color : '#172030'}`,
-        background: hovered ? 'rgba(255,255,255,0.02)' : '#0b1016',
+        border: `1px solid ${hovered ? definition.color : 'var(--border)'}`,
+        background: hovered ? 'rgba(255,255,255,0.02)' : 'var(--bg-panel)',
         borderRadius: '6px',
         padding: '10px',
         margin: '4px 8px',
@@ -55,7 +55,7 @@ export default function ComponentItem({ definition }: ComponentItemProps) {
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '11px',
             fontWeight: 600,
-            color: '#b0c8e0',
+            color: 'var(--text)',
             letterSpacing: '0.02em',
           }}
         >
@@ -66,7 +66,7 @@ export default function ComponentItem({ definition }: ComponentItemProps) {
         style={{
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: '9px',
-          color: '#a1b3bf',
+          color: 'var(--text-dim)',
           margin: 0,
           lineHeight: 1.4,
           letterSpacing: '0.02em',

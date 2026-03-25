@@ -101,7 +101,7 @@ export default function ResizableDraggable({
           height: 8,
           cursor: 'ns-resize',
           zIndex: 10,
-          background: 'linear-gradient(to bottom, #17203044 60%, transparent)',
+          background: 'linear-gradient(to bottom, color-mix(in srgb, var(--border) 27%, transparent) 60%, transparent)',
         }}
       />
     </div>
