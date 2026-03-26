@@ -65,9 +65,7 @@ export default function CronJobFields({ nodeId }: CronJobFieldsProps) {
       </div>
 
       <div style={fieldStyle}>
-        <label style={labelStyle}>
-          Interval (minutes)
-        </label>
+        <label style={labelStyle}>Interval (minutes)</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <input
             type="range"
@@ -78,11 +76,14 @@ export default function CronJobFields({ nodeId }: CronJobFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { intervalMinutes: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '44px', textAlign: 'right' }}>
-            {intervalMinutes >= 60
-              ? `${(intervalMinutes / 60).toFixed(1)}h`
-              : `${intervalMinutes}m`}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={1440}
+            value={intervalMinutes}
+            onChange={(e) => updateNodeConfig(nodeId, { intervalMinutes: Math.min(1440, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 

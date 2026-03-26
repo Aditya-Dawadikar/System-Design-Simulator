@@ -23,6 +23,32 @@ export type LoadBalancerAlgorithm =
 
 export type NodeStatus = 'idle' | 'ok' | 'stressed' | 'critical' | 'failed';
 
+// ---------------------------------------------------------------------------
+// Per-component detail metrics (discriminated union keyed by `kind`)
+// ---------------------------------------------------------------------------
+
+export type ComponentDetail =
+  | { kind: 'cdn';            cacheHitRate: number; originBypassRps: number; bandwidthGbps: number }
+  | { kind: 'load_balancer';  activeConnections: number; scalingEvent: boolean; connectionsPerSecond: number }
+  | { kind: 'app_server';
+      cpuPct: number;
+      memPct: number;
+      activeInstances: number;
+      pendingInstances: number;   // cold instances still provisioning
+      pendingCountdown: number;   // ticks until pending are ready
+      warmReserve: number;        // warm-pool slots currently available
+      scalingEvent: 'up-warm' | 'up-cold' | 'down' | null;
+      scaleUpCooldown: number;    // ticks remaining before next scale-up allowed
+      scaleDownCooldown: number;  // ticks remaining before next scale-down allowed
+    }
+  | { kind: 'cache';          hitRate: number; evictionRate: number; memoryUsedPct: number }
+  | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number }
+  | { kind: 'cloud_storage';  throttledRequests: number; bandwidthUtilization: number }
+  | { kind: 'pubsub';         subscriberLagMs: number; consumerThroughput: number; unackedMessages: number }
+  | { kind: 'cloud_function'; coldStarts: number; throttledInvocations: number; concurrencyUsed: number }
+  | { kind: 'cron_job';       overlapCount: number; lastRunDurationMs: number }
+  | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number };
+
 export interface NodeMetrics {
   rpsIn: number;
   rpsOut: number;
@@ -31,6 +57,18 @@ export interface NodeMetrics {
   p99LatencyMs: number;
   errorRate: number;
   failed: boolean;
+  /** Fraction of rpsIn that is read traffic (0–1). Propagated from traffic generators. */
+  readRatio: number;
+  /** Derived: rpsIn * readRatio */
+  readRpsIn: number;
+  /** Derived: rpsIn * (1 - readRatio) */
+  writeRpsIn: number;
+  /** Database only: load on read path (read rps / read capacity) */
+  readLoad?: number;
+  /** Database only: load on write path (write rps / write capacity) */
+  writeLoad?: number;
+  /** Component-specific failure/scaling detail metrics */
+  detail?: ComponentDetail;
 }
 
 export interface EdgeMetrics {
@@ -55,6 +93,15 @@ export interface NodeConfig {
   ramGb?: number;
   rpsPerInstance?: number;
   avgLatencyMs?: number;
+  // Autoscaling (app_server)
+  minInstances?: number;           // floor — always running
+  maxInstances?: number;           // ceiling — never exceed
+  warmPoolSize?: number;           // pre-provisioned instances, scale instantly (0-latency)
+  scaleUpCpuPct?: number;          // CPU % that triggers a scale-out (default 75)
+  scaleDownCpuPct?: number;        // CPU % that triggers a scale-in  (default 25)
+  scaleUpCooldownTicks?: number;   // ticks between scale-up events   (default 4 = 2 s)
+  scaleDownCooldownTicks?: number; // ticks before a scale-in fires   (default 12 = 6 s)
+  coldProvisionTicks?: number;     // ticks to provision a cold instance (default 6 = 3 s)
   // Cache
   memoryGb?: number;
   ttlSeconds?: number;
@@ -91,6 +138,8 @@ export interface NodeConfig {
   // Traffic Generator
   generatorRps?: number;
   generatorPattern?: TrafficPattern;
+  /** 0–100: percentage of traffic that is reads. Default 50. */
+  readRatioPct?: number;
 }
 
 export interface EdgeConfig {

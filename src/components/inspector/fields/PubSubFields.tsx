@@ -56,9 +56,14 @@ export default function PubSubFields({ nodeId }: PubSubFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { partitions: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '16px' }}>
-            {partitions}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={32}
+            value={partitions}
+            onChange={(e) => updateNodeConfig(nodeId, { partitions: Math.min(32, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -73,9 +78,14 @@ export default function PubSubFields({ nodeId }: PubSubFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { messageRetentionHours: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '36px', textAlign: 'right' }}>
-            {config.messageRetentionHours ?? 24}h
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={168}
+            value={config.messageRetentionHours ?? 24}
+            onChange={(e) => updateNodeConfig(nodeId, { messageRetentionHours: Math.min(168, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 

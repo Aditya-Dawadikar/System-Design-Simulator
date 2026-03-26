@@ -134,17 +134,19 @@ export default function CacheFields({ nodeId }: CacheFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { memoryGb: Number(e.target.value) })}
             style={{ flex: 1, accentColor: 'var(--accent-orange)', cursor: 'pointer' }}
           />
-          <span
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={config.memoryGb ?? 8}
+            onChange={(e) => updateNodeConfig(nodeId, { memoryGb: Math.min(64, Math.max(1, Number(e.target.value))) })}
             style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--accent-orange)',
-              fontWeight: 600,
-              minWidth: '36px',
+              background: 'var(--bg-base)', border: '1px solid var(--border)',
+              color: 'var(--accent-orange)', borderRadius: '4px',
+              fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600,
+              padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0,
             }}
-          >
-            {config.memoryGb ?? 8} GB
-          </span>
+          />
         </div>
       </div>
 

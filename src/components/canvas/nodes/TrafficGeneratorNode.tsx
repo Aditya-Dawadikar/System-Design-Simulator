@@ -20,6 +20,7 @@ const PATTERN_LABELS: Record<string, string> = {
   chaos: 'CHAOS',
 };
 
+
 export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
   const config = useArchitectureStore((s) => s.nodeConfigs[id]);
   const running = useSimulationStore((s) => s.running);
@@ -28,8 +29,11 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
   const label = config?.label ?? 'Traffic Gen';
   const baseRps = config?.generatorRps ?? 1000;
   const pattern = config?.generatorPattern ?? 'steady';
+  const readPct = config?.readRatioPct ?? 50;
 
   const liveRps = running && metrics ? metrics.rpsIn : baseRps;
+  const readRps = liveRps * readPct / 100;
+  const writeRps = liveRps * (100 - readPct) / 100;
 
   const boxShadow = selected
     ? `0 0 0 2px ${COLOR}44, 0 0 20px ${COLOR}33`
@@ -68,25 +72,36 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
             {label}
           </span>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: `${COLOR}18`,
-            border: `1px solid ${COLOR}55`,
-            borderRadius: 4,
-            padding: '2px 6px',
-          }}
-        >
-          <span style={{ fontSize: 9, fontWeight: 700, color: COLOR, letterSpacing: '0.06em' }}>
-            {PATTERN_LABELS[pattern] ?? pattern.toUpperCase()}
-          </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <div
+            style={{
+              background: `${COLOR}18`,
+              border: `1px solid ${COLOR}55`,
+              borderRadius: 4,
+              padding: '2px 6px',
+            }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 700, color: COLOR, letterSpacing: '0.06em' }}>
+              {PATTERN_LABELS[pattern] ?? pattern.toUpperCase()}
+            </span>
+          </div>
+          <div
+            style={{
+              background: '#38bdf808',
+              border: '1px solid #38bdf855',
+              borderRadius: 4,
+              padding: '2px 6px',
+            }}
+          >
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#38bdf8', letterSpacing: '0.06em' }}>
+              R{readPct}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* RPS display */}
-      <div style={{ padding: '8px 12px' }}>
+      <div style={{ padding: '8px 12px 6px' }}>
         <div style={{ color: 'var(--text-dim)', fontSize: 10, marginBottom: 4 }}>
           {running ? 'LIVE RPS' : 'BASE RPS'}
         </div>
@@ -95,6 +110,18 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
           <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)', marginLeft: 4 }}>
             req/s
           </span>
+        </div>
+      </div>
+
+      {/* Read / Write split */}
+      <div style={{ padding: '0 12px 8px', display: 'flex', gap: 12 }}>
+        <div>
+          <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>R </span>
+          <span style={{ fontWeight: 600, fontSize: 11, color: '#38bdf8' }}>{fmtRps(readRps)}</span>
+        </div>
+        <div>
+          <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>W </span>
+          <span style={{ fontWeight: 600, fontSize: 11, color: '#fb923c' }}>{fmtRps(writeRps)}</span>
         </div>
       </div>
 

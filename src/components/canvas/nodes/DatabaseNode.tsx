@@ -71,9 +71,10 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
     ? Math.round(metrics.load * maxConn)
     : null;
 
-  const loadPerShard = running && metrics
-    ? metrics.load
-    : null;
+  const readLoad  = running && metrics ? (metrics.readLoad  ?? metrics.load) : null;
+  const writeLoad = running && metrics ? (metrics.writeLoad ?? metrics.load) : null;
+  const readRps   = running && metrics ? metrics.readRpsIn  : null;
+  const writeRps  = running && metrics ? metrics.writeRpsIn : null;
 
   return (
     <div
@@ -154,21 +155,33 @@ export default memo(function DatabaseNode({ id, selected }: NodeProps) {
           }}
         >
           <div>
+            <span style={{ color: '#38bdf8', fontSize: 10 }}>R.RPS</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#38bdf8' }}>
+              {readRps !== null ? fmtRps(readRps) : '—'}
+            </div>
+          </div>
+          <div>
+            <span style={{ color: '#fb923c', fontSize: 10 }}>W.RPS</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: '#fb923c' }}>
+              {writeRps !== null ? fmtRps(writeRps) : '—'}
+            </div>
+          </div>
+          <div>
+            <span style={{ color: '#38bdf8', fontSize: 10 }}>R.LOAD</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: readLoad !== null && readLoad > 1.05 ? 'var(--accent-red)' : readLoad !== null && readLoad > 0.8 ? 'var(--accent-orange)' : '#38bdf8' }}>
+              {readLoad !== null ? `${Math.round(readLoad * 100)}%` : '—'}
+            </div>
+          </div>
+          <div>
+            <span style={{ color: '#fb923c', fontSize: 10 }}>W.LOAD</span>
+            <div style={{ fontWeight: 600, fontSize: 12, color: writeLoad !== null && writeLoad > 1.05 ? 'var(--accent-red)' : writeLoad !== null && writeLoad > 0.8 ? 'var(--accent-orange)' : '#fb923c' }}>
+              {writeLoad !== null ? `${Math.round(writeLoad * 100)}%` : '—'}
+            </div>
+          </div>
+          <div>
             <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>CONNS</span>
             <div style={{ fontWeight: 600, fontSize: 12, color: COLOR }}>
               {connections !== null ? connections : '—'}
-            </div>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD/SHARD</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
-              {loadPerShard !== null ? `${Math.round(loadPerShard * 100)}%` : '—'}
-            </div>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS</span>
-            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
-              {fmtRps(metrics.rpsIn)}
             </div>
           </div>
           <div>

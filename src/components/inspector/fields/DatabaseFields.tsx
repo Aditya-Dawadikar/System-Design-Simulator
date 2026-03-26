@@ -56,7 +56,9 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
   const updateNodeConfig = useArchitectureStore((s) => s.updateNodeConfig);
 
   const shards = config.shards ?? 1;
-  const capacity = shards * RPS_PER_SHARD;
+  const readReplicas = config.readReplicas ?? 0;
+  const writeCapacity = shards * RPS_PER_SHARD;
+  const readCapacity  = (shards + readReplicas) * RPS_PER_SHARD;
 
   return (
     <div>
@@ -76,15 +78,11 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
       <div style={fieldStyle}>
         <label style={labelStyle}>
           Shards
-          <span
-            style={{
-              marginLeft: '8px',
-              color: 'var(--accent-purple)',
-              fontWeight: 500,
-              fontSize: '9px',
-            }}
-          >
-            capacity: {capacity.toLocaleString()} rps
+          <span style={{ marginLeft: '8px', color: '#fb923c', fontWeight: 500, fontSize: '9px' }}>
+            W: {writeCapacity.toLocaleString()} rps
+          </span>
+          <span style={{ marginLeft: '6px', color: '#38bdf8', fontWeight: 500, fontSize: '9px' }}>
+            R: {readCapacity.toLocaleString()} rps
           </span>
         </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -96,42 +94,41 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { shards: Number(e.target.value) })}
             style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--accent-purple)',
-              fontWeight: 600,
-              minWidth: '12px',
-            }}
-          >
-            {shards}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={shards}
+            onChange={(e) => updateNodeConfig(nodeId, { shards: Math.min(8, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-purple)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
       <div style={fieldStyle}>
-        <label style={labelStyle}>Read Replicas</label>
+        <label style={labelStyle}>
+          Read Replicas
+          <span style={{ marginLeft: '8px', color: '#38bdf8', fontWeight: 500, fontSize: '9px' }}>
+            +{(readReplicas * RPS_PER_SHARD).toLocaleString()} read rps
+          </span>
+        </label>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <input
             type="range"
             min={0}
             max={4}
-            value={config.readReplicas ?? 0}
+            value={readReplicas}
             onChange={(e) => updateNodeConfig(nodeId, { readReplicas: Number(e.target.value) })}
             style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--accent-purple)',
-              fontWeight: 600,
-              minWidth: '12px',
-            }}
-          >
-            {config.readReplicas ?? 0}
-          </span>
+          <input
+            type="number"
+            min={0}
+            max={4}
+            value={readReplicas}
+            onChange={(e) => updateNodeConfig(nodeId, { readReplicas: Math.min(4, Math.max(0, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-purple)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -158,18 +155,14 @@ export default function DatabaseFields({ nodeId }: DatabaseFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { storageGb: Number(e.target.value) })}
             style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }}
           />
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--accent-purple)',
-              fontWeight: 600,
-              minWidth: '48px',
-              textAlign: 'right',
-            }}
-          >
-            {(config.storageGb ?? 100).toLocaleString()} GB
-          </span>
+          <input
+            type="number"
+            min={10}
+            max={10000}
+            value={config.storageGb ?? 100}
+            onChange={(e) => updateNodeConfig(nodeId, { storageGb: Math.min(10000, Math.max(10, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-purple)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '62px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
     </div>

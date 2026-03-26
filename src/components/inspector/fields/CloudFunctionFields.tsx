@@ -80,9 +80,14 @@ export default function CloudFunctionFields({ nodeId }: CloudFunctionFieldsProps
             onChange={(e) => updateNodeConfig(nodeId, { maxConcurrency: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '36px', textAlign: 'right' }}>
-            {concurrency}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            value={concurrency}
+            onChange={(e) => updateNodeConfig(nodeId, { maxConcurrency: Math.min(1000, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -98,9 +103,15 @@ export default function CloudFunctionFields({ nodeId }: CloudFunctionFieldsProps
             onChange={(e) => updateNodeConfig(nodeId, { avgExecutionMs: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '44px', textAlign: 'right' }}>
-            {execMs}ms
-          </span>
+          <input
+            type="number"
+            min={10}
+            max={5000}
+            step={10}
+            value={execMs}
+            onChange={(e) => updateNodeConfig(nodeId, { avgExecutionMs: Math.min(5000, Math.max(10, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
     </div>

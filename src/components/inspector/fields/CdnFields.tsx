@@ -57,9 +57,22 @@ function Slider({ min, max, value, onChange, color = 'var(--accent-cyan)', unit 
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ flex: 1, accentColor: color, cursor: 'pointer' }}
       />
-      <span style={sliderValueStyle}>
-        {value}{unit}
-      </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Math.min(max, Math.max(min, Number(e.target.value))))}
+          style={{
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            color, borderRadius: '4px',
+            fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600,
+            padding: '3px 5px', width: '50px', textAlign: 'right', outline: 'none',
+          }}
+        />
+        {unit && <span style={{ ...sliderValueStyle, color, minWidth: 'unset' }}>{unit}</span>}
+      </div>
     </div>
   );
 }

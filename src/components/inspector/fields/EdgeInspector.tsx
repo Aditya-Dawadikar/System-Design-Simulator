@@ -155,17 +155,14 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
             onChange={(e) => updateEdgeConfig(edgeId, { retryCount: Number(e.target.value) })}
             style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }}
           />
-          <span
-            style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: '11px',
-              color: 'var(--accent-cyan)',
-              fontWeight: 600,
-              minWidth: '12px',
-            }}
-          >
-            {config.retryCount}
-          </span>
+          <input
+            type="number"
+            min={0}
+            max={5}
+            value={config.retryCount}
+            onChange={(e) => updateEdgeConfig(edgeId, { retryCount: Math.min(5, Math.max(0, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-cyan)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '46px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -203,17 +200,17 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
                 }
                 style={{ flex: 1, accentColor: 'var(--accent-red)', cursor: 'pointer' }}
               />
-              <span
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '11px',
-                  color: 'var(--accent-red)',
-                  fontWeight: 600,
-                  minWidth: '32px',
-                }}
-              >
-                {config.circuitBreakerThreshold}%
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={config.circuitBreakerThreshold}
+                  onChange={(e) => updateEdgeConfig(edgeId, { circuitBreakerThreshold: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                  style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-red)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '46px', textAlign: 'right', outline: 'none' }}
+                />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'var(--text-dim)' }}>%</span>
+              </div>
             </div>
           </div>
         </div>
@@ -286,17 +283,17 @@ export default function EdgeInspector({ edgeId }: EdgeInspectorProps) {
                 }
                 style={{ flex: 1, accentColor: 'var(--accent-yellow)', cursor: 'pointer' }}
               />
-              <span
-                style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: '11px',
-                  color: 'var(--accent-yellow)',
-                  fontWeight: 600,
-                  minWidth: '36px',
-                }}
-              >
-                {config.splitPct}%
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={config.splitPct}
+                  onChange={(e) => updateEdgeConfig(edgeId, { splitPct: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                  style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--accent-yellow)', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '46px', textAlign: 'right', outline: 'none' }}
+                />
+                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'var(--text-dim)' }}>%</span>
+              </div>
             </div>
           </div>
           <div

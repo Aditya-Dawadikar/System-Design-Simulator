@@ -1,5 +1,5 @@
 import type { Node, Edge } from 'reactflow';
-import type { NodeConfig, EdgeConfig, NodeMetrics, EdgeMetrics, ComponentType, TrafficPattern } from '@/types';
+import type { NodeConfig, EdgeConfig, NodeMetrics, EdgeMetrics, ComponentType, TrafficPattern, ComponentDetail } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Traffic pattern multiplier (mirrors simulationStore — kept in sync manually)
@@ -200,10 +200,12 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       return 100000;
 
     case 'database': {
+      // Total capacity = primary shards (reads+writes) + replicas (reads only)
+      // Used as the "combined" capacity for the base load calculation.
       const shards = config.shards ?? 1;
       const rpsPerShard = config.rpsPerShard ?? 800;
       const readReplicas = config.readReplicas ?? 0;
-      return shards * rpsPerShard + readReplicas * rpsPerShard * 0.7;
+      return shards * rpsPerShard + readReplicas * rpsPerShard;
     }
 
     case 'cloud_storage': {
@@ -331,7 +333,8 @@ function computeEdgeShare(
 export function runSimulationTick(
   topology: Topology,
   incomingRps: number,
-  tick = 0
+  tick = 0,
+  previousMetrics: Record<string, NodeMetrics> = {}
 ): {
   nodeMetrics: Record<string, NodeMetrics>;
   edgeMetrics: Record<string, EdgeMetrics>;
@@ -353,6 +356,10 @@ export function runSimulationTick(
   // ---- 3. Track computed rpsOut per node (needed for downstream calcs) ----
   const rpsOutMap = new Map<string, number>();
 
+  // ---- 4. Track read ratio per node (fraction of rpsOut that is reads) ----
+  // Propagated from traffic_generator config downstream through the graph.
+  const readRatioOutMap = new Map<string, number>();
+
   // ---- 5. BFS traversal in topological order ----
   const nodeMetrics: Record<string, NodeMetrics> = {};
 
@@ -360,22 +367,26 @@ export function runSimulationTick(
     const type = getNodeType(node);
     const config = nodeConfigs[node.id] ?? {};
 
-    // Determine rpsIn
+    // Determine rpsIn and readRatio
     let rpsIn: number;
+    let readRatio: number; // fraction of rpsIn that is read traffic
 
     if (type === 'cron_job') {
       // Schedule-driven: emits at a fixed rate regardless of global incomingRps.
       const tasksPerRun = config.tasksPerRun ?? 100;
       const intervalSec = (config.intervalMinutes ?? 5) * 60;
       rpsIn = tasksPerRun / intervalSec;
+      readRatio = 0.5; // cron tasks are assumed balanced
     } else if (type === 'traffic_generator') {
       // Each traffic generator has its own configurable RPS + pattern.
       const baseRps = config.generatorRps ?? 1000;
       const pattern = config.generatorPattern ?? 'steady';
       rpsIn = baseRps * getTrafficMultiplier(pattern, tick);
+      readRatio = (config.readRatioPct ?? 50) / 100;
     } else if (sourceIdSet.has(node.id)) {
       // Other unconnected source nodes receive the global incoming RPS.
       rpsIn = incomingRps;
+      readRatio = 0.5;
     } else {
       // Sum contributions from all upstream nodes, respecting edge splitPct.
       const upstreamIds = (adj.upstream.get(node.id) ?? []).filter(
@@ -386,71 +397,286 @@ export function runSimulationTick(
         nodeMetrics[node.id] = {
           rpsIn: 0, rpsOut: 0, load: 0,
           latencyMs: 0, p99LatencyMs: 0, errorRate: 0, failed: false,
+          readRatio: 0.5, readRpsIn: 0, writeRpsIn: 0,
         };
         rpsOutMap.set(node.id, 0);
+        readRatioOutMap.set(node.id, 0.5);
         continue;
       }
 
       rpsIn = 0;
+      let totalReadRpsIn = 0;
       for (const uid of upstreamIds) {
         const upstreamOut = rpsOutMap.get(uid) ?? 0;
-        rpsIn += computeEdgeShare(uid, node.id, upstreamOut, adj, edgeConfigs, cyclingEdgeIds);
+        const share = computeEdgeShare(uid, node.id, upstreamOut, adj, edgeConfigs, cyclingEdgeIds);
+        rpsIn += share;
+        totalReadRpsIn += share * (readRatioOutMap.get(uid) ?? 0.5);
       }
+      // Weighted average read ratio from upstream contributions
+      readRatio = rpsIn > 0 ? totalReadRpsIn / rpsIn : 0.5;
     }
+
+    const readRpsIn = rpsIn * readRatio;
+    const writeRpsIn = rpsIn * (1 - readRatio);
 
     // ---- Capacity & load ----
     const capacity = computeCapacity(type, config);
-    const load = capacity > 0 ? rpsIn / capacity : 0;
-    const failed = load > 1.05;
 
-    // ---- Latency ----
+    // Database: compute separate read/write loads since replicas only serve reads.
+    let load: number;
+    let readLoad: number | undefined;
+    let writeLoad: number | undefined;
+
+    if (type === 'database') {
+      const shards = config.shards ?? 1;
+      const rpsPerShard = config.rpsPerShard ?? 800;
+      const readReplicas = config.readReplicas ?? 0;
+      const writeCapacity = shards * rpsPerShard;                        // primary only
+      const dbReadCapacity = (shards + readReplicas) * rpsPerShard;      // primary + replicas
+      writeLoad = writeCapacity > 0 ? writeRpsIn / writeCapacity : 0;
+      readLoad  = dbReadCapacity > 0 ? readRpsIn  / dbReadCapacity  : 0;
+      load = Math.max(readLoad, writeLoad);
+    } else {
+      load = capacity > 0 ? rpsIn / capacity : 0;
+    }
+
+    let failed = load > 1.05;
+
+    // ---- Latency (base + queueing; may be augmented per type below) ----
     const baseLatency = computeBaseLatency(type, config);
-    // Queueing delay grows as load² — capped at a reasonable ceiling
     const queueingFactor = Math.pow(Math.min(load, 2.0), 2) * 200;
-    const latencyMs = baseLatency + queueingFactor;
-    const p99LatencyMs = latencyMs * 2.5;
+    let latencyMs = baseLatency + queueingFactor;
 
     // ---- Error rate ----
-    const errorRate = computeErrorRate(load);
+    let errorRate = computeErrorRate(load);
 
-    // ---- rpsOut — apply component-specific rules ----
+    // ---- Per-type tick: rpsOut, readRatioOut, latency penalties, detail ----
+    const prevNodeMetrics = previousMetrics[node.id];
     let rpsOut: number;
+    let readRatioOut = readRatio;
+    let detail: ComponentDetail | undefined;
 
     switch (type) {
       case 'cdn': {
-        // CDN absorbs a portion of requests via caching; only uncacheable
-        // traffic propagates downstream.
+        // Cache hit rate degrades under load (invalidation storms / hot-key eviction)
         const cacheablePct = config.cacheablePct ?? 60;
-        const propagationRatio = 1 - cacheablePct / 100;
-        // Still apply drop rate if overloaded
         const dropRate = computeDropRate(load);
-        rpsOut = rpsIn * propagationRatio * (1 - dropRate);
+        const baseCacheHitRate = cacheablePct / 100;
+        const hitRateDegradation = Math.max(0, (load - 0.8) * 0.4);
+        const effectiveHitRate = baseCacheHitRate * Math.max(0.4, 1 - hitRateDegradation);
+        const readRpsOut  = readRpsIn  * (1 - effectiveHitRate) * (1 - dropRate);
+        const writeRpsOut = writeRpsIn * (1 - dropRate);
+        rpsOut = readRpsOut + writeRpsOut;
+        readRatioOut = rpsOut > 0 ? readRpsOut / rpsOut : readRatio;
+        const bandwidthGbps = (rpsIn * 0.8) / 1000; // ~100 KB avg CDN object
+        detail = { kind: 'cdn', cacheHitRate: effectiveHitRate, originBypassRps: rpsIn * (1 - effectiveHitRate), bandwidthGbps };
+        break;
+      }
+
+      case 'load_balancer': {
+        const dropRate = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        // ~50 ms avg connection hold → 0.05 connections per rps
+        const maxConns = config.maxConnections ?? 100000;
+        const activeConnections = Math.min(maxConns, Math.round(rpsIn * 0.05));
+        // Signals downstream auto-scale when load exceeds 75 %
+        const scalingEvent = load > 0.75;
+        detail = { kind: 'load_balancer', activeConnections, scalingEvent, connectionsPerSecond: rpsIn };
+        break;
+      }
+
+      case 'app_server': {
+        const prevD = prevNodeMetrics?.detail?.kind === 'app_server' ? prevNodeMetrics.detail : null;
+
+        // ---- Config ----
+        const cpuCores       = config.cpuCores       ?? 4;
+        const ramGb          = config.ramGb          ?? 8;
+        const perInstRps     = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
+        const minInst        = config.minInstances        ?? (config.instances ?? 2);
+        const maxInst        = config.maxInstances        ?? (config.instances ?? 2) * 4;
+        const warmPool       = config.warmPoolSize        ?? 0;
+        const scaleUpThr     = config.scaleUpCpuPct           ?? 75;
+        const scaleDownThr   = config.scaleDownCpuPct         ?? 25;
+        const scaleUpCDConf  = config.scaleUpCooldownTicks    ?? 4;
+        const scaleDownCDConf = config.scaleDownCooldownTicks ?? 12;
+        const coldTicks      = config.coldProvisionTicks      ?? 6;
+
+        // ---- Load stateful counters from previous tick ----
+        let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
+        let pendingInstances  = prevD?.pendingInstances  ?? 0;
+        let pendingCountdown  = prevD?.pendingCountdown  ?? 0;
+        let warmReserve       = prevD?.warmReserve       ?? warmPool;
+        let scaleUpCooldown   = prevD?.scaleUpCooldown   ?? 0;
+        let scaleDownCooldown = prevD?.scaleDownCooldown ?? 0;
+
+        // 1. Promote cold instances whose countdown has expired
+        if (pendingCountdown > 0) pendingCountdown--;
+        if (pendingCountdown === 0 && pendingInstances > 0) {
+          activeInstances = Math.min(maxInst, activeInstances + pendingInstances);
+          pendingInstances = 0;
+        }
+
+        // 2. Decrement cooldowns
+        if (scaleUpCooldown   > 0) scaleUpCooldown--;
+        if (scaleDownCooldown > 0) scaleDownCooldown--;
+
+        // 3. Dynamic capacity from live active-instance count
+        const effectiveCap = activeInstances * perInstRps;
+        const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
+        const cpuPct = Math.min(100, dynamicLoad * 90);
+        const memPct = Math.min(100, cpuPct * 0.7 + 15);
+
+        // 4. Autoscaling decision (takes effect next tick via detail state)
+        let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
+        const totalProvisioned = activeInstances + pendingInstances;
+
+        if (cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+          if (warmReserve > 0) {
+            // Warm instance — activates instantly, no latency penalty
+            activeInstances++;
+            warmReserve--;
+            scalingEvent = 'up-warm';
+          } else if (pendingInstances === 0) {
+            // Cold instance — needs coldTicks to become ready
+            pendingInstances = 1;
+            pendingCountdown = coldTicks;
+            scalingEvent = 'up-cold';
+          }
+          scaleUpCooldown = scaleUpCDConf;
+        } else if (cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+          activeInstances--;
+          // Decommissioned instance refills warm pool up to configured size
+          if (warmPool > 0 && warmReserve < warmPool) warmReserve++;
+          scalingEvent = 'down';
+          scaleDownCooldown = scaleDownCDConf;
+        }
+
+        // 5. Override load / failed / latency / errorRate with dynamic values
+        load      = dynamicLoad;
+        failed    = dynamicLoad > 1.05;
+        errorRate = computeErrorRate(dynamicLoad);
+        latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
+
+        const dropRate = computeDropRate(dynamicLoad);
+        rpsOut = rpsIn * (1 - dropRate);
+
+        detail = {
+          kind: 'app_server', cpuPct, memPct,
+          activeInstances, pendingInstances, pendingCountdown,
+          warmReserve, scalingEvent,
+          scaleUpCooldown, scaleDownCooldown,
+        };
         break;
       }
 
       case 'cache': {
-        // Cache hits are served locally; only misses propagate downstream.
         const memoryGb = config.memoryGb ?? 8;
-        const hitRate = Math.min(0.85, (memoryGb / 64) * 0.85);
-        const dropRate = computeDropRate(load);
-        rpsOut = rpsIn * (1 - hitRate) * (1 - dropRate);
+        const baseHitRate = Math.min(0.85, (memoryGb / 64) * 0.85);
+        // Memory fills under load → evictions → degraded hit rate
+        const memoryUsedPct  = Math.min(100, load * 70 + 25);
+        const evictionRate   = Math.max(0, (memoryUsedPct - 80) / 20); // 0→1 when mem 80→100 %
+        const hitRate        = baseHitRate * (1 - evictionRate * 0.5);
+        const dropRate       = computeDropRate(load);
+        const readRpsOut  = readRpsIn  * (1 - hitRate) * (1 - dropRate);
+        const writeRpsOut = writeRpsIn * (1 - dropRate);
+        rpsOut = readRpsOut + writeRpsOut;
+        readRatioOut = rpsOut > 0 ? readRpsOut / rpsOut : readRatio;
+        detail = { kind: 'cache', hitRate, evictionRate, memoryUsedPct };
         break;
       }
 
-      case 'pubsub': {
-        // Pub/Sub buffers messages; downstream consumers receive at their own pace.
-        // Under normal load it relays fully; once overloaded it drops messages.
+      case 'database': {
         const dropRate = computeDropRate(load);
         rpsOut = rpsIn * (1 - dropRate);
+        const shards  = config.shards       ?? 1;
+        const replicas = config.readReplicas ?? 0;
+        const poolSizePerNode  = 100; // connections per shard/replica
+        const connectionPoolMax  = (shards + replicas) * poolSizePerNode;
+        // avg 100 ms query → 0.1 connections consumed per rps
+        const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(rpsIn * 0.1));
+        const queryQueueDepth    = Math.max(0, Math.round(rpsIn * 0.1 - connectionPoolMax));
+        // Slow queries: lock contention grows after 60 % load
+        const slowQueryRate = Math.min(0.4, Math.max(0, (load - 0.6) / 0.6) * 0.4);
+        // Pool exhaustion spikes latency
+        if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
+        detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate };
         break;
       }
 
       case 'cloud_storage': {
-        // Storage nodes are typically terminal (read/write sinks), but can emit
-        // change-notification events downstream (e.g., trigger a function).
-        // Pass through at a low rate (10%) to model event triggers.
         const dropRate = computeDropRate(load);
-        rpsOut = rpsIn * 0.1 * (1 - dropRate);
+        rpsOut = rpsIn * 0.1 * (1 - dropRate); // ~10 % event notifications
+        const throughputMbps = config.storageThroughputMbps ?? 1000;
+        const objectSizeKb   = config.objectSizeKb ?? 512;
+        const bwUsedMbps     = (rpsIn * objectSizeKb * 8) / 1000;
+        const bandwidthUtilization = Math.min(100, (bwUsedMbps / throughputMbps) * 100);
+        const throttledRequests    = Math.round(Math.max(0, rpsIn - capacity));
+        detail = { kind: 'cloud_storage', throttledRequests, bandwidthUtilization };
+        break;
+      }
+
+      case 'pubsub': {
+        const dropRate = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        // Subscriber lag: stateful — accumulates when producers outpace consumers
+        const consumerThroughput = capacity;
+        const prevLagMs = prevNodeMetrics?.detail?.kind === 'pubsub'
+          ? prevNodeMetrics.detail.subscriberLagMs : 0;
+        // Per 500 ms tick: lag grows/shrinks proportional to over/under-capacity ratio
+        const lagDeltaMs = consumerThroughput > 0
+          ? ((rpsIn - consumerThroughput) / consumerThroughput) * 500 : 0;
+        const subscriberLagMs = Math.max(0, prevLagMs + lagDeltaMs);
+        const unackedMessages  = Math.round(subscriberLagMs * consumerThroughput / 1000);
+        detail = { kind: 'pubsub', subscriberLagMs, consumerThroughput, unackedMessages };
+        break;
+      }
+
+      case 'cloud_function': {
+        const dropRate = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        const maxConcurrency = config.maxConcurrency  ?? 100;
+        const execMs         = config.avgExecutionMs  ?? 200;
+        // Instantaneous inflight invocations
+        const concurrencyUsed = Math.min(maxConcurrency, rpsIn * execMs / 1000);
+        const prevConcurrency = prevNodeMetrics?.detail?.kind === 'cloud_function'
+          ? prevNodeMetrics.detail.concurrencyUsed : 0;
+        // Cold starts triggered by rapid concurrency growth (new containers needed)
+        const coldStarts = Math.round(Math.max(0, concurrencyUsed - prevConcurrency) * 0.8);
+        const throttledInvocations = Math.round(
+          Math.max(0, rpsIn * execMs / 1000 - maxConcurrency) * (1000 / execMs)
+        );
+        // Cold start latency penalty (container init ~400 ms)
+        if (coldStarts > 0) latencyMs += 400 * Math.min(1, coldStarts / 10);
+        detail = { kind: 'cloud_function', coldStarts, throttledInvocations, concurrencyUsed };
+        break;
+      }
+
+      case 'cron_job': {
+        rpsOut = rpsIn; // emitted tasks pass through unchanged
+        const tasksPerRun = config.tasksPerRun    ?? 100;
+        const intervalMs  = (config.intervalMinutes ?? 5) * 60 * 1000;
+        // ~10 ms per dispatched task (scheduling overhead)
+        const lastRunDurationMs = tasksPerRun * 10;
+        const overlapCount = lastRunDurationMs > intervalMs
+          ? Math.ceil(lastRunDurationMs / intervalMs) : 0;
+        detail = { kind: 'cron_job', overlapCount, lastRunDurationMs };
+        break;
+      }
+
+      case 'worker_pool': {
+        const dropRate = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        // Queue depth: stateful — accumulates when inflow > processing capacity
+        const prevQueueDepth = prevNodeMetrics?.detail?.kind === 'worker_pool'
+          ? prevNodeMetrics.detail.queueDepth : 0;
+        // Δ per 500 ms tick
+        const queueDelta     = (rpsIn - capacity) * 0.5;
+        const queueDepth     = Math.max(0, prevQueueDepth + queueDelta);
+        const workerUtilization = Math.min(100, load * 100);
+        const taskBacklogMs  = capacity > 0 ? (queueDepth / capacity) * 1000 : 0;
+        // Growing backlog increases effective latency (queue-wait time)
+        if (queueDepth > 0) latencyMs += Math.min(5000, taskBacklogMs * 0.1);
+        detail = { kind: 'worker_pool', queueDepth, workerUtilization, taskBacklogMs };
         break;
       }
 
@@ -461,6 +687,8 @@ export function runSimulationTick(
       }
     }
 
+    const p99LatencyMs = latencyMs * 2.5;
+
     nodeMetrics[node.id] = {
       rpsIn,
       rpsOut,
@@ -469,9 +697,16 @@ export function runSimulationTick(
       p99LatencyMs,
       errorRate,
       failed,
+      readRatio,
+      readRpsIn,
+      writeRpsIn,
+      ...(readLoad  !== undefined && { readLoad }),
+      ...(writeLoad !== undefined && { writeLoad }),
+      ...(detail    !== undefined && { detail }),
     };
 
     rpsOutMap.set(node.id, rpsOut);
+    readRatioOutMap.set(node.id, readRatioOut);
   }
 
   // ---- 6. Edge metrics ----

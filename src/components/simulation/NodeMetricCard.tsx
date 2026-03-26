@@ -5,7 +5,7 @@ import Sparkline from '@/components/shared/Sparkline';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import { COMPONENT_BY_TYPE } from '@/constants/components';
-import type { ComponentType } from '@/types';
+import type { ComponentType, ComponentDetail } from '@/types';
 
 interface NodeMetricCardProps {
   nodeId: string;
@@ -50,6 +50,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
   const p99       = metrics?.p99LatencyMs ?? 0;
   const errorRate = metrics?.errorRate ?? 0;
   const failed    = metrics?.failed    ?? false;
+  const detail    = metrics?.detail;
 
   const status    = getStatusLabel(load, failed);
   const stressed  = load > 0.8;
@@ -190,6 +191,9 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
           </span>
         </div>
 
+        {/* Component-specific detail row */}
+        {detail && <ComponentDetailRow detail={detail} />}
+
         {/* Sparkline — 40-point RPS history */}
         <div style={{ paddingTop: '2px' }}>
           <Sparkline data={history} color={color} width={134} height={28} />
@@ -226,6 +230,91 @@ function StatCell({
         {label}
       </span>
       <span style={{ color, fontSize: '11px', fontWeight: '600' }}>{value}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component-specific detail row
+// ---------------------------------------------------------------------------
+
+function fmtRps(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0); }
+function fmtMs(n: number)  { return n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n.toFixed(0)}ms`; }
+function fmtPct(n: number) { return `${n.toFixed(0)}%`; }
+
+interface DetailPair { label: string; value: string; alert?: boolean }
+
+function DetailCell({ label, value, alert }: DetailPair) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px', flex: 1 }}>
+      <span style={{ color: 'var(--text-dim)', fontSize: '9px', letterSpacing: '0.06em' }}>{label}</span>
+      <span style={{
+        fontSize: '10px', fontWeight: '600',
+        color: alert ? 'var(--accent-orange)' : 'var(--text-dim)',
+      }}>{value}</span>
+    </div>
+  );
+}
+
+function ComponentDetailRow({ detail }: { detail: ComponentDetail }) {
+  let a: DetailPair;
+  let b: DetailPair;
+
+  switch (detail.kind) {
+    case 'cdn':
+      a = { label: 'HIT',    value: fmtPct(detail.cacheHitRate * 100) };
+      b = { label: 'ORIGIN', value: `${fmtRps(detail.originBypassRps)}/s` };
+      break;
+    case 'load_balancer':
+      a = { label: 'CONN',  value: fmtRps(detail.activeConnections) };
+      b = { label: 'SCALE', value: detail.scalingEvent ? 'YES' : 'NO', alert: detail.scalingEvent };
+      break;
+    case 'app_server': {
+      const instStr = detail.pendingInstances > 0
+        ? `${detail.activeInstances}+${detail.pendingInstances}`
+        : `${detail.activeInstances}`;
+      const warmStr = detail.warmReserve > 0 ? ` ~${detail.warmReserve}` : '';
+      a = { label: 'CPU',  value: fmtPct(detail.cpuPct), alert: detail.cpuPct > 80 };
+      b = { label: 'INST', value: `${instStr}${warmStr}`,
+            alert: detail.pendingInstances > 0 || detail.scalingEvent !== null };
+      break;
+    }
+    case 'cache':
+      a = { label: 'HIT',   value: fmtPct(detail.hitRate * 100) };
+      b = { label: 'EVICT', value: fmtPct(detail.evictionRate * 100), alert: detail.evictionRate > 0 };
+      break;
+    case 'database':
+      a = { label: 'POOL',  value: `${detail.connectionPoolUsed}/${detail.connectionPoolMax}`, alert: detail.connectionPoolUsed >= detail.connectionPoolMax };
+      b = { label: 'QUEUE', value: `${detail.queryQueueDepth}`, alert: detail.queryQueueDepth > 0 };
+      break;
+    case 'cloud_storage':
+      a = { label: 'BW',    value: fmtPct(detail.bandwidthUtilization), alert: detail.bandwidthUtilization > 80 };
+      b = { label: 'THROT', value: `${detail.throttledRequests}`, alert: detail.throttledRequests > 0 };
+      break;
+    case 'pubsub':
+      a = { label: 'LAG',   value: fmtMs(detail.subscriberLagMs), alert: detail.subscriberLagMs > 1000 };
+      b = { label: 'UNACK', value: fmtRps(detail.unackedMessages), alert: detail.unackedMessages > 0 };
+      break;
+    case 'cloud_function':
+      a = { label: 'CONC',  value: `${detail.concurrencyUsed.toFixed(0)}` };
+      b = { label: 'COLD',  value: `×${detail.coldStarts}`, alert: detail.coldStarts > 0 };
+      break;
+    case 'cron_job':
+      a = { label: 'DUR',  value: fmtMs(detail.lastRunDurationMs) };
+      b = { label: 'OVLP', value: `${detail.overlapCount}`, alert: detail.overlapCount > 0 };
+      break;
+    case 'worker_pool':
+      a = { label: 'UTIL',    value: fmtPct(detail.workerUtilization), alert: detail.workerUtilization > 90 };
+      b = { label: 'BACKLOG', value: fmtMs(detail.taskBacklogMs),       alert: detail.taskBacklogMs > 1000 };
+      break;
+    default:
+      return null;
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '4px', justifyContent: 'space-between' }}>
+      <DetailCell {...a} />
+      <DetailCell {...b} />
     </div>
   );
 }

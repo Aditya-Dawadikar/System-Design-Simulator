@@ -90,9 +90,15 @@ export default function CloudStorageFields({ nodeId }: CloudStorageFieldsProps) 
             onChange={(e) => updateNodeConfig(nodeId, { storageThroughputMbps: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '56px', textAlign: 'right' }}>
-            {throughputMbps} Mb
-          </span>
+          <input
+            type="number"
+            min={100}
+            max={10000}
+            step={100}
+            value={throughputMbps}
+            onChange={(e) => updateNodeConfig(nodeId, { storageThroughputMbps: Math.min(10000, Math.max(100, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '62px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -108,9 +114,14 @@ export default function CloudStorageFields({ nodeId }: CloudStorageFieldsProps) 
             onChange={(e) => updateNodeConfig(nodeId, { objectSizeKb: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '60px', textAlign: 'right' }}>
-            {objectSizeKb >= 1024 ? `${(objectSizeKb / 1024).toFixed(1)}MB` : `${objectSizeKb}KB`}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={102400}
+            value={objectSizeKb}
+            onChange={(e) => updateNodeConfig(nodeId, { objectSizeKb: Math.min(102400, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '62px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 

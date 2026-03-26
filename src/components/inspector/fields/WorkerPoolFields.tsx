@@ -61,9 +61,14 @@ export default function WorkerPoolFields({ nodeId }: WorkerPoolFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { workerCount: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '20px', textAlign: 'right' }}>
-            {workers}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={workers}
+            onChange={(e) => updateNodeConfig(nodeId, { workerCount: Math.min(64, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -78,9 +83,14 @@ export default function WorkerPoolFields({ nodeId }: WorkerPoolFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { threadCount: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '20px', textAlign: 'right' }}>
-            {threads}
-          </span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={threads}
+            onChange={(e) => updateNodeConfig(nodeId, { threadCount: Math.min(64, Math.max(1, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '54px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -96,9 +106,15 @@ export default function WorkerPoolFields({ nodeId }: WorkerPoolFieldsProps) {
             onChange={(e) => updateNodeConfig(nodeId, { taskDurationMs: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '52px', textAlign: 'right' }}>
-            {durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`}
-          </span>
+          <input
+            type="number"
+            min={10}
+            max={30000}
+            step={10}
+            value={durationMs}
+            onChange={(e) => updateNodeConfig(nodeId, { taskDurationMs: Math.min(30000, Math.max(10, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '62px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
     </div>

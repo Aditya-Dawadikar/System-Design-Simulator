@@ -52,6 +52,8 @@ export default function TrafficGeneratorFields({ nodeId }: TrafficGeneratorField
 
   const rps = config.generatorRps ?? 1000;
   const pattern = config.generatorPattern ?? 'steady';
+  const readPct = config.readRatioPct ?? 50;
+  const writePct = 100 - readPct;
 
   return (
     <div>
@@ -72,9 +74,15 @@ export default function TrafficGeneratorFields({ nodeId }: TrafficGeneratorField
             onChange={(e) => updateNodeConfig(nodeId, { generatorRps: Number(e.target.value) })}
             style={{ flex: 1, accentColor: COLOR, cursor: 'pointer' }}
           />
-          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', color: COLOR, fontWeight: 600, minWidth: '44px', textAlign: 'right' }}>
-            {rps >= 1000 ? `${(rps / 1000).toFixed(1)}k` : rps}
-          </span>
+          <input
+            type="number"
+            min={100}
+            max={100000}
+            step={100}
+            value={rps}
+            onChange={(e) => updateNodeConfig(nodeId, { generatorRps: Math.min(100000, Math.max(100, Number(e.target.value))) })}
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: COLOR, borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '70px', textAlign: 'right', outline: 'none', flexShrink: 0 }}
+          />
         </div>
       </div>
 
@@ -103,6 +111,56 @@ export default function TrafficGeneratorFields({ nodeId }: TrafficGeneratorField
       >
         <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'var(--text-dim)', lineHeight: 1.5 }}>
           {PATTERNS.find((p) => p.value === pattern)?.description}
+        </div>
+      </div>
+
+      {/* Read / Write distribution */}
+      <div style={fieldStyle}>
+        <label style={labelStyle}>
+          Read / Write Distribution
+        </label>
+        {/* Split bar labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: '#38bdf8', fontWeight: 600 }}>
+            READ {readPct}% · {Math.round(rps * readPct / 100).toLocaleString()} rps
+          </span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: '#fb923c', fontWeight: 600 }}>
+            {Math.round(rps * writePct / 100).toLocaleString()} rps · {writePct}% WRITE
+          </span>
+        </div>
+        {/* Visual split bar */}
+        <div style={{ height: '6px', borderRadius: '3px', overflow: 'hidden', display: 'flex', marginBottom: '8px' }}>
+          <div style={{ width: `${readPct}%`, background: '#38bdf8', transition: 'width 0.15s' }} />
+          <div style={{ flex: 1, background: '#fb923c' }} />
+        </div>
+        {/* Slider + number input */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={readPct}
+            onChange={(e) => updateNodeConfig(nodeId, { readRatioPct: Number(e.target.value) })}
+            style={{ flex: 1, accentColor: '#38bdf8', cursor: 'pointer' }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={5}
+              value={readPct}
+              onChange={(e) => updateNodeConfig(nodeId, { readRatioPct: Math.min(100, Math.max(0, Number(e.target.value))) })}
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', color: '#38bdf8', borderRadius: '4px', fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', fontWeight: 600, padding: '3px 5px', width: '46px', textAlign: 'right', outline: 'none' }}
+            />
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: 'var(--text-dim)' }}>%R</span>
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3px' }}>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: 'var(--text-dim)' }}>Write only</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: 'var(--text-dim)' }}>Balanced</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: 'var(--text-dim)' }}>Read only</span>
         </div>
       </div>
 

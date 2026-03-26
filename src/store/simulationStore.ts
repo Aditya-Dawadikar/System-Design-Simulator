@@ -73,7 +73,8 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
     const { nodes, edges, nodeConfigs, edgeConfigs } = useArchitectureStore.getState();
 
     const currentRps = peakRps * getTrafficMultiplier(pattern, tick);
-    const result = runSimulationTick({ nodes, edges, nodeConfigs, edgeConfigs }, currentRps, tick);
+    const prevMetrics = get().nodeMetrics;
+    const result = runSimulationTick({ nodes, edges, nodeConfigs, edgeConfigs }, currentRps, tick, prevMetrics);
 
     // Update history (last 40 points)
     const newHistory: Record<string, number[]> = {};
@@ -83,18 +84,63 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
     }
 
     // Generate events
+    const fmtMs = (ms: number) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`;
     const newEvents: LogEvent[] = [];
     for (const [id, m] of Object.entries(result.nodeMetrics)) {
-      const prev = get().nodeMetrics[id];
+      const prev = prevMetrics[id];
+      const cfg  = useArchitectureStore.getState().nodeConfigs[id];
+      const lbl  = cfg?.label ?? id;
+
+      // Generic load events
       if (!prev?.failed && m.failed) {
-        const cfg = useArchitectureStore.getState().nodeConfigs[id];
-        newEvents.push({ tick: tick + 1, level: 'error', message: `${cfg?.label ?? id} OVERLOADED`, nodeId: id });
+        newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} OVERLOADED`, nodeId: id });
       } else if (prev?.failed && !m.failed) {
-        const cfg = useArchitectureStore.getState().nodeConfigs[id];
-        newEvents.push({ tick: tick + 1, level: 'info', message: `${cfg?.label ?? id} recovered`, nodeId: id });
+        newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} recovered`, nodeId: id });
       } else if (!prev?.failed && m.load > 0.75 && (prev?.load ?? 0) <= 0.75) {
-        const cfg = useArchitectureStore.getState().nodeConfigs[id];
-        newEvents.push({ tick: tick + 1, level: 'warn', message: `${cfg?.label ?? id} load at ${Math.round(m.load * 100)}% — approaching capacity`, nodeId: id });
+        newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} load at ${Math.round(m.load * 100)}% — approaching capacity`, nodeId: id });
+      }
+
+      // Component-specific failure mode events
+      const d  = m.detail;
+      const pd = prev?.detail;
+
+      if (d?.kind === 'pubsub') {
+        const prevLag = pd?.kind === 'pubsub' ? pd.subscriberLagMs : 0;
+        if (d.subscriberLagMs > 2000 && prevLag <= 2000)
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} subscriber lag ${fmtMs(d.subscriberLagMs)} — consumers falling behind`, nodeId: id });
+      }
+      if (d?.kind === 'cloud_function') {
+        if (d.coldStarts > 0 && (pd?.kind !== 'cloud_function' || pd.coldStarts === 0))
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} cold starts ×${d.coldStarts} — concurrency ramp`, nodeId: id });
+        if (d.throttledInvocations > 0 && (pd?.kind !== 'cloud_function' || pd.throttledInvocations === 0))
+          newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} throttling ${d.throttledInvocations}/s — max concurrency reached`, nodeId: id });
+      }
+      if (d?.kind === 'database') {
+        const prevQueue = pd?.kind === 'database' ? pd.queryQueueDepth : 0;
+        if (d.queryQueueDepth > 0 && prevQueue === 0)
+          newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} connection pool exhausted — ${d.queryQueueDepth} queries queuing`, nodeId: id });
+      }
+      if (d?.kind === 'worker_pool') {
+        const prevBacklog = pd?.kind === 'worker_pool' ? pd.taskBacklogMs : 0;
+        if (d.taskBacklogMs > 2000 && prevBacklog <= 2000)
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} task backlog ${fmtMs(d.taskBacklogMs)} — queue depth ${Math.round(d.queueDepth)}`, nodeId: id });
+      }
+      if (d?.kind === 'app_server' && d.scalingEvent) {
+        const prevEvent = pd?.kind === 'app_server' ? pd.scalingEvent : null;
+        if (d.scalingEvent !== prevEvent) {
+          const msg =
+            d.scalingEvent === 'up-warm'
+              ? `${lbl} warm-pool +1 → ${d.activeInstances} inst — CPU ${d.cpuPct.toFixed(0)}%`
+              : d.scalingEvent === 'up-cold'
+              ? `${lbl} cold-start provisioning (+1) — CPU ${d.cpuPct.toFixed(0)}% (ready in ${d.pendingCountdown} ticks)`
+              : `${lbl} scale-in → ${d.activeInstances} inst — CPU ${d.cpuPct.toFixed(0)}%`;
+          newEvents.push({ tick: tick + 1, level: 'k8s', message: msg, nodeId: id });
+        }
+      }
+      if (d?.kind === 'load_balancer') {
+        const prevScale = pd?.kind === 'load_balancer' ? pd.scalingEvent : false;
+        if (d.scalingEvent && !prevScale)
+          newEvents.push({ tick: tick + 1, level: 'k8s', message: `${lbl} auto-scale signal — ${Math.round(d.activeConnections).toLocaleString()} active conns`, nodeId: id });
       }
     }
 
