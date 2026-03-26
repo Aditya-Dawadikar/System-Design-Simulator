@@ -6,12 +6,8 @@ import { COMPONENT_BY_TYPE, DEFAULT_EDGE_CONFIG } from '@/constants/components';
 // Node IDs
 // ---------------------------------------------------------------------------
 
-const ID_CDN  = 'default-cdn';
-const ID_LB   = 'default-lb';
-const ID_AS1  = 'default-as1';
-const ID_AS2  = 'default-as2';
-const ID_CACHE = 'default-cache';
-const ID_DB   = 'default-db';
+const ID_TRAFFIC = 'default-traffic';
+const ID_APP_SERVER = 'default-app-server';
 
 // ---------------------------------------------------------------------------
 // Nodes
@@ -19,40 +15,16 @@ const ID_DB   = 'default-db';
 
 const nodes: Node[] = [
   {
-    id:       ID_CDN,
-    type:     'cdn',
+    id:       ID_TRAFFIC,
+    type:     'traffic_generator',
     position: { x: 200, y: 100 },
-    data:     { label: COMPONENT_BY_TYPE.cdn.label },
+    data:     { label: COMPONENT_BY_TYPE.traffic_generator.label },
   },
   {
-    id:       ID_LB,
-    type:     'load_balancer',
-    position: { x: 450, y: 100 },
-    data:     { label: COMPONENT_BY_TYPE.load_balancer.label },
-  },
-  {
-    id:       ID_AS1,
+    id:       ID_APP_SERVER,
     type:     'app_server',
-    position: { x: 700, y: 20 },
-    data:     { label: `${COMPONENT_BY_TYPE.app_server.label} 1` },
-  },
-  {
-    id:       ID_AS2,
-    type:     'app_server',
-    position: { x: 700, y: 180 },
-    data:     { label: `${COMPONENT_BY_TYPE.app_server.label} 2` },
-  },
-  {
-    id:       ID_CACHE,
-    type:     'cache',
-    position: { x: 950, y: 20 },
-    data:     { label: COMPONENT_BY_TYPE.cache.label },
-  },
-  {
-    id:       ID_DB,
-    type:     'database',
-    position: { x: 950, y: 180 },
-    data:     { label: COMPONENT_BY_TYPE.database.label },
+    position: { x: 500, y: 100 },
+    data:     { label: COMPONENT_BY_TYPE.app_server.label },
   },
 ];
 
@@ -61,12 +33,8 @@ const nodes: Node[] = [
 // ---------------------------------------------------------------------------
 
 const nodeConfigs: Record<string, NodeConfig> = {
-  [ID_CDN]:   { ...COMPONENT_BY_TYPE.cdn.defaults,           label: COMPONENT_BY_TYPE.cdn.label            },
-  [ID_LB]:    { ...COMPONENT_BY_TYPE.load_balancer.defaults, label: COMPONENT_BY_TYPE.load_balancer.label  },
-  [ID_AS1]:   { ...COMPONENT_BY_TYPE.app_server.defaults,    label: `${COMPONENT_BY_TYPE.app_server.label} 1` },
-  [ID_AS2]:   { ...COMPONENT_BY_TYPE.app_server.defaults,    label: `${COMPONENT_BY_TYPE.app_server.label} 2` },
-  [ID_CACHE]: { ...COMPONENT_BY_TYPE.cache.defaults,         label: COMPONENT_BY_TYPE.cache.label           },
-  [ID_DB]:    { ...COMPONENT_BY_TYPE.database.defaults,      label: COMPONENT_BY_TYPE.database.label        },
+  [ID_TRAFFIC]:    { ...COMPONENT_BY_TYPE.traffic_generator.defaults, label: COMPONENT_BY_TYPE.traffic_generator.label },
+  [ID_APP_SERVER]: { ...COMPONENT_BY_TYPE.app_server.defaults, label: COMPONENT_BY_TYPE.app_server.label },
 };
 
 // ---------------------------------------------------------------------------
@@ -83,14 +51,7 @@ function makeEdge(source: string, target: string): Edge {
 }
 
 const edges: Edge[] = [
-  makeEdge(ID_CDN,   ID_LB),
-  makeEdge(ID_LB,    ID_AS1),
-  makeEdge(ID_LB,    ID_AS2),
-  makeEdge(ID_AS1,   ID_CACHE),
-  makeEdge(ID_AS1,   ID_DB),
-  makeEdge(ID_AS2,   ID_CACHE),
-  makeEdge(ID_AS2,   ID_DB),
-  makeEdge(ID_CACHE, ID_DB),
+  makeEdge(ID_TRAFFIC, ID_APP_SERVER),
 ];
 
 // ---------------------------------------------------------------------------
