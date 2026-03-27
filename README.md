@@ -82,6 +82,32 @@ src/
 - Autoscaling FSM for app servers (warm/cold pool, cooldowns, pending, etc)
 - Capacity formulas per type (see CLAUDE.md for details)
 
+## Component Failure Modes & Scaling Logic
+
+| Component         | Failure Mode(s)                                                                 | Scaling Logic / Statefulness                                                                                 |
+|-------------------|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| **CDN**           | Overload: cache hit rate degrades, origin bypass increases, errors if load > 1.2 | No scaling; stateless. Cache hit rate drops under high load.                                                |
+| **Load Balancer** | Overload: drops requests above capacity, signals downstream to scale             | No scaling itself; emits scalingEvent when load > 75%. Tracks active connections.                           |
+| **App Server**    | Overload: requests dropped, error rate rises, latency spikes                    | **Autoscaling FSM:**
+|                   |                                                                                 | - Scales up if CPU > threshold (warm pool first, else cold provision)
+|                   |                                                                                 | - Scales down if CPU < threshold
+|                   |                                                                                 | - State: active, pending, warm reserve, cooldowns, scalingEvent                                             |
+| **Cache**         | Overload: hit rate drops, eviction rate rises, errors if load > 1.2             | No scaling; stateless. Hit rate and eviction rate degrade under high load/memory pressure.                  |
+| **Database**      | Overload: connection pool exhaustion, query queue grows, slow queries, errors    | No scaling; stateless. Separate read/write load. Connection pool and query queue depth tracked.             |
+| **Cloud Storage** | Overload: throttled requests, bandwidth utilization hits 100%                   | No scaling; stateless. Throttled requests and bandwidth utilization tracked.                                |
+| **Pub/Sub**       | Overload: subscriber lag accumulates, unacked messages grow                     | **Stateful:** subscriberLagMs accumulates if producers > consumers. No scaling.                             |
+| **Cloud Function**| Overload: throttled invocations, cold starts, latency spikes                    | **Stateful:** coldStarts triggered by concurrency growth. No scaling. Tracks concurrency/throttling.        |
+| **Cron Job**      | Overlap: last run duration exceeds interval                                     | No scaling; stateless. Tracks overlapCount and lastRunDurationMs.                                           |
+| **Worker Pool**   | Overload: queueDepth grows, task backlog increases, latency spikes              | **Stateful:** queueDepth accumulates if inflow > capacity. No scaling. Tracks backlog and utilization.      |
+| **Traffic Gen.**  | N/A (source node)                                                               | No scaling; stateless. Emits traffic with configurable pattern.                                             |
+| **Comment**       | N/A (annotation only)                                                           | No scaling; stateless. No simulation effect.                                                                |
+
+**Notes:**
+- All components are considered overloaded if `load > 1.05` (requests dropped, error rate rises).
+- Autoscaling is implemented only for App Server nodes (see "Autoscaling FSM").
+- Stateful components: App Server (scaling), Pub/Sub (lag), Cloud Function (cold starts), Worker Pool (queue).
+- See `src/simulation/SimulationEngine.ts` and `CLAUDE.md` for full logic details.
+
 ## Contributing
 
 ## Extending the Simulator
@@ -105,3 +131,5 @@ Pull requests and issues are welcome! Please open an issue to discuss major chan
 
 ## License
 MIT
+
+For detailed descriptions and usage instructions for each component, see [COMPONENTS.md](./COMPONENTS.md).
