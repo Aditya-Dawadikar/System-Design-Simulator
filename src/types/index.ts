@@ -94,6 +94,8 @@ export interface NodeConfig {
   rpsPerInstance?: number;
   avgLatencyMs?: number;
   // Autoscaling (app_server)
+  autoscalingEnabled?: boolean;    // master toggle — default false
+  warmPoolEnabled?: boolean;       // warm replica toggle — default false
   minInstances?: number;           // floor — always running
   maxInstances?: number;           // ceiling — never exceed
   warmPoolSize?: number;           // pre-provisioned instances, scale instantly (0-latency)

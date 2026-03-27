@@ -488,84 +488,112 @@ export function runSimulationTick(
       case 'app_server': {
         const prevD = prevNodeMetrics?.detail?.kind === 'app_server' ? prevNodeMetrics.detail : null;
 
-        // ---- Config ----
-        const cpuCores       = config.cpuCores       ?? 4;
-        const ramGb          = config.ramGb          ?? 8;
-        const perInstRps     = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
-        const minInst        = config.minInstances        ?? (config.instances ?? 2);
-        const maxInst        = config.maxInstances        ?? (config.instances ?? 2) * 4;
-        const warmPool       = config.warmPoolSize        ?? 0;
-        const scaleUpThr     = config.scaleUpCpuPct           ?? 75;
-        const scaleDownThr   = config.scaleDownCpuPct         ?? 25;
-        const scaleUpCDConf  = config.scaleUpCooldownTicks    ?? 4;
-        const scaleDownCDConf = config.scaleDownCooldownTicks ?? 12;
-        const coldTicks      = config.coldProvisionTicks      ?? 6;
+        const autoscalingEnabled = config.autoscalingEnabled ?? false;
+        const warmPoolEnabled    = config.warmPoolEnabled    ?? false;
 
-        // ---- Load stateful counters from previous tick ----
-        let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
-        let pendingInstances  = prevD?.pendingInstances  ?? 0;
-        let pendingCountdown  = prevD?.pendingCountdown  ?? 0;
-        let warmReserve       = prevD?.warmReserve       ?? warmPool;
-        let scaleUpCooldown   = prevD?.scaleUpCooldown   ?? 0;
-        let scaleDownCooldown = prevD?.scaleDownCooldown ?? 0;
+        // ---- Shared config ----
+        const cpuCores   = config.cpuCores       ?? 4;
+        const ramGb      = config.ramGb          ?? 8;
+        const perInstRps = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
 
-        // 1. Promote cold instances whose countdown has expired
-        if (pendingCountdown > 0) pendingCountdown--;
-        if (pendingCountdown === 0 && pendingInstances > 0) {
-          activeInstances = Math.min(maxInst, activeInstances + pendingInstances);
-          pendingInstances = 0;
-        }
+        if (!autoscalingEnabled) {
+          // ── Static path: fixed instance count, no FSM ──────────────
+          const staticInstances = config.instances ?? 2;
+          const effectiveCap    = staticInstances * perInstRps;
+          const dynamicLoad     = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
+          const cpuPct = Math.min(100, dynamicLoad * 90);
+          const memPct = Math.min(100, cpuPct * 0.7 + 15);
 
-        // 2. Decrement cooldowns
-        if (scaleUpCooldown   > 0) scaleUpCooldown--;
-        if (scaleDownCooldown > 0) scaleDownCooldown--;
+          load      = dynamicLoad;
+          failed    = dynamicLoad > 1.05;
+          errorRate = computeErrorRate(dynamicLoad);
+          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
+          rpsOut    = rpsIn * (1 - computeDropRate(dynamicLoad));
 
-        // 3. Dynamic capacity from live active-instance count
-        const effectiveCap = activeInstances * perInstRps;
-        const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
-        const cpuPct = Math.min(100, dynamicLoad * 90);
-        const memPct = Math.min(100, cpuPct * 0.7 + 15);
+          detail = {
+            kind: 'app_server', cpuPct, memPct,
+            activeInstances: staticInstances,
+            pendingInstances: 0, pendingCountdown: 0,
+            warmReserve: 0, scalingEvent: null,
+            scaleUpCooldown: 0, scaleDownCooldown: 0,
+          };
+        } else {
+          // ── Autoscaling FSM path ───────────────────────────────────
+          const minInst         = config.minInstances         ?? (config.instances ?? 2);
+          const maxInst         = config.maxInstances         ?? (config.instances ?? 2) * 4;
+          // Warm pool only active when warmPoolEnabled
+          const warmPool        = warmPoolEnabled ? (config.warmPoolSize ?? 0) : 0;
+          const scaleUpThr      = config.scaleUpCpuPct          ?? 75;
+          const scaleDownThr    = config.scaleDownCpuPct        ?? 25;
+          const scaleUpCDConf   = config.scaleUpCooldownTicks   ?? 4;
+          const scaleDownCDConf = config.scaleDownCooldownTicks ?? 12;
+          const coldTicks       = config.coldProvisionTicks     ?? 6;
 
-        // 4. Autoscaling decision (takes effect next tick via detail state)
-        let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
-        const totalProvisioned = activeInstances + pendingInstances;
+          // Load stateful counters from previous tick
+          let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
+          let pendingInstances  = prevD?.pendingInstances  ?? 0;
+          let pendingCountdown  = prevD?.pendingCountdown  ?? 0;
+          // warmReserve only valid when warmPoolEnabled; otherwise always 0
+          let warmReserve       = warmPoolEnabled ? (prevD?.warmReserve ?? warmPool) : 0;
+          let scaleUpCooldown   = prevD?.scaleUpCooldown   ?? 0;
+          let scaleDownCooldown = prevD?.scaleDownCooldown ?? 0;
 
-        if (cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
-          if (warmReserve > 0) {
-            // Warm instance — activates instantly, no latency penalty
-            activeInstances++;
-            warmReserve--;
-            scalingEvent = 'up-warm';
-          } else if (pendingInstances === 0) {
-            // Cold instance — needs coldTicks to become ready
-            pendingInstances = 1;
-            pendingCountdown = coldTicks;
-            scalingEvent = 'up-cold';
+          // 1. Promote cold instances whose countdown has expired
+          if (pendingCountdown > 0) pendingCountdown--;
+          if (pendingCountdown === 0 && pendingInstances > 0) {
+            activeInstances = Math.min(maxInst, activeInstances + pendingInstances);
+            pendingInstances = 0;
           }
-          scaleUpCooldown = scaleUpCDConf;
-        } else if (cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
-          activeInstances--;
-          // Decommissioned instance refills warm pool up to configured size
-          if (warmPool > 0 && warmReserve < warmPool) warmReserve++;
-          scalingEvent = 'down';
-          scaleDownCooldown = scaleDownCDConf;
+
+          // 2. Decrement cooldowns
+          if (scaleUpCooldown   > 0) scaleUpCooldown--;
+          if (scaleDownCooldown > 0) scaleDownCooldown--;
+
+          // 3. Dynamic capacity from live active-instance count
+          const effectiveCap = activeInstances * perInstRps;
+          const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
+          const cpuPct = Math.min(100, dynamicLoad * 90);
+          const memPct = Math.min(100, cpuPct * 0.7 + 15);
+
+          // 4. Scaling decision
+          let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
+          const totalProvisioned = activeInstances + pendingInstances;
+
+          if (cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+            if (warmPoolEnabled && warmReserve > 0) {
+              // Warm instance — activates instantly, no latency penalty
+              activeInstances++;
+              warmReserve--;
+              scalingEvent = 'up-warm';
+            } else if (pendingInstances === 0) {
+              // Cold instance — needs coldTicks to become ready
+              pendingInstances = 1;
+              pendingCountdown = coldTicks;
+              scalingEvent = 'up-cold';
+            }
+            scaleUpCooldown = scaleUpCDConf;
+          } else if (cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+            activeInstances--;
+            // Decommissioned instance refills warm pool only when warm pool is enabled
+            if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
+            scalingEvent = 'down';
+            scaleDownCooldown = scaleDownCDConf;
+          }
+
+          // 5. Override load / failed / latency / errorRate with dynamic values
+          load      = dynamicLoad;
+          failed    = dynamicLoad > 1.05;
+          errorRate = computeErrorRate(dynamicLoad);
+          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
+          rpsOut    = rpsIn * (1 - computeDropRate(dynamicLoad));
+
+          detail = {
+            kind: 'app_server', cpuPct, memPct,
+            activeInstances, pendingInstances, pendingCountdown,
+            warmReserve, scalingEvent,
+            scaleUpCooldown, scaleDownCooldown,
+          };
         }
-
-        // 5. Override load / failed / latency / errorRate with dynamic values
-        load      = dynamicLoad;
-        failed    = dynamicLoad > 1.05;
-        errorRate = computeErrorRate(dynamicLoad);
-        latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
-
-        const dropRate = computeDropRate(dynamicLoad);
-        rpsOut = rpsIn * (1 - dropRate);
-
-        detail = {
-          kind: 'app_server', cpuPct, memPct,
-          activeInstances, pendingInstances, pendingCountdown,
-          warmReserve, scalingEvent,
-          scaleUpCooldown, scaleDownCooldown,
-        };
         break;
       }
 
