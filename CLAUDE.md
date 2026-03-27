@@ -6,12 +6,18 @@ Project-specific instructions for Claude Code. Read this before making any chang
 
 ## Stack
 
-- **Framework**: Next.js 16 (App Router) + React 19
-- **Canvas**: React Flow 11 (`reactflow`)
-- **State**: Zustand 5 — two stores (see below)
-- **Styling**: Tailwind CSS v4 + JetBrains Mono + CSS variables
-- **Language**: TypeScript 5 (strict)
-- **No Vite** — despite any older notes, this is a Next.js project
+| Package | Version |
+|---------|---------|
+| Next.js | ^16.2.1 |
+| React | ^19.2.4 |
+| reactflow | ^11.11.4 |
+| zustand | ^5.0.12 |
+| recharts | ^3.8.0 |
+| lucide-react | ^1.0.1 |
+| Tailwind CSS | ^4.2.2 |
+| TypeScript | ^5.9.3 |
+
+**No Vite** — this is a Next.js project. Dev server: `npm run dev`.
 
 ---
 
@@ -25,7 +31,7 @@ Project-specific instructions for Claude Code. Read this before making any chang
 ### CSS / Tailwind
 - `globals.css` must have the Google Fonts `@import` **before** `@tailwindcss/…` — order matters
 - Design language: dark terminal/datacenter aesthetic
-- CSS variables used throughout: `--bg-base`, `--bg-panel`, `--border`, `--text`, `--text-dim`, `--accent-green`, `--accent-cyan`, `--accent-purple`, `--accent-orange`, `--accent-red`, `--accent-yellow`
+- CSS variables: `--bg-base`, `--bg-panel`, `--border`, `--text`, `--text-dim`, `--accent-green`, `--accent-cyan`, `--accent-purple`, `--accent-orange`, `--accent-red`, `--accent-yellow`
 
 ### React Flow
 - All node types must be registered in `Canvas.tsx`
@@ -34,174 +40,451 @@ Project-specific instructions for Claude Code. Read this before making any chang
 
 ---
 
-## Architecture
-
-### Source layout
+## Source layout
 
 ```
 src/
-├── app/                        # Next.js App Router
-│   ├── layout.tsx
-│   └── page.tsx                # Root — mounts Canvas + dashboard
+├── app/
+│   ├── layout.tsx                  # Root layout
+│   └── page.tsx                    # Root page — mounts Canvas + dashboard
 ├── components/
 │   ├── canvas/
-│   │   ├── Canvas.tsx          # React Flow canvas, registers all node types
-│   │   ├── EdgeWire.tsx        # Custom 'wire' edge
-│   │   └── nodes/              # One file per ComponentType
+│   │   ├── Canvas.tsx              # React Flow canvas, registers all node types
+│   │   ├── EdgeWire.tsx            # Custom 'wire' edge
+│   │   └── nodes/                  # One file per ComponentType
 │   ├── inspector/
-│   │   ├── Inspector.tsx       # Right-panel config inspector
-│   │   └── fields/             # Per-type config field components
-│   ├── shared/                 # ArcGauge, Sparkline, StatCell, Badge, etc.
-│   ├── sidebar/                # ComponentLibrary drag-source
+│   │   ├── Inspector.tsx           # Right-panel config inspector
+│   │   ├── EdgeInspector.tsx       # Edge config fields
+│   │   └── fields/                 # Per-type config field components
+│   ├── shared/                     # ArcGauge, Sparkline, StatCell, Badge, etc.
+│   ├── sidebar/                    # ComponentLibrary drag-source (collapsible)
 │   └── simulation/
-│       ├── MetricsDashboard.tsx  # Bottom panel: global stats + node cards
-│       ├── NodeMetricCard.tsx    # Per-node metric card with detail row
-│       ├── SimulationControls.tsx
-│       └── EventLog.tsx
+│       ├── MetricsDashboard.tsx    # Bottom panel: global stats + node cards
+│       ├── NodeMetricCard.tsx      # Per-node metric card with detail row
+│       ├── SimulationControls.tsx  # Run/Stop/Reset buttons
+│       └── EventLog.tsx            # Real-time event log with auto-scroll
 ├── constants/
-│   └── components.ts           # COMPONENT_DEFINITIONS, defaults per type
+│   └── components.ts               # COMPONENT_DEFINITIONS, capacity constants
 ├── simulation/
-│   └── SimulationEngine.ts     # Pure TS tick engine (no React)
+│   └── SimulationEngine.ts         # Pure TS tick engine (no React)
 ├── store/
-│   ├── architectureStore.ts    # Zustand — canvas state, persisted to localStorage
-│   └── simulationStore.ts      # Zustand — ephemeral simulation state + tick loop
+│   ├── architectureStore.ts        # Zustand — canvas state, persisted to localStorage
+│   └── simulationStore.ts          # Zustand — ephemeral simulation state + tick loop
 ├── templates/
-│   └── defaultTemplate.ts      # Pre-built example architecture
+│   └── defaultTemplate.ts          # Pre-built example architecture
 └── types/
-    └── index.ts                # All shared TypeScript types
+    └── index.ts                    # All shared TypeScript types
 ```
 
-### Two Zustand stores
+---
+
+## Two Zustand stores
 
 | Store | Persistence | Responsibility |
 |-------|-------------|----------------|
 | `architectureStore` | localStorage | nodes, edges, nodeConfigs, edgeConfigs |
-| `simulationStore` | ephemeral | running/tick/metrics/events/history; 500ms tick loop |
+| `simulationStore` | ephemeral | running/tick/metrics/events/history; 500 ms tick loop |
 
 ---
 
-## Types (`src/types/index.ts`)
+## Component types
 
-### ComponentType
-`'cdn' | 'load_balancer' | 'app_server' | 'cache' | 'database' | 'cloud_storage' | 'pubsub' | 'cloud_function' | 'cron_job' | 'worker_pool' | 'comment' | 'traffic_generator'`
+Defined in `src/constants/components.ts`. The `ComponentType` union in `src/types/index.ts`:
+
+| Type | Label | Icon | Color | Description |
+|------|-------|------|-------|-------------|
+| `cdn` | CDN Edge | ◎ | `#00ddff` | Content delivery network |
+| `load_balancer` | Load Balancer | ⇌ | `#ff55bb` | Distributes incoming traffic |
+| `app_server` | App Server | ◈ | `#00ff88` | Application compute layer with optional autoscaling |
+| `cache` | Redis Cache | ⚡ | `#ff8833` | In-memory key-value store |
+| `database` | PostgreSQL | ▣ | `#bb66ff` | Persistent relational/NoSQL database |
+| `cloud_storage` | Cloud Storage | ◫ | `#38bdf8` | Object storage buckets |
+| `block_storage` | Block Storage | ▤ | `#d97706` | Persistent block volume (NVMe/SSD/HDD) |
+| `network_storage` | Network Storage | ⊜ | `#6366f1` | Shared network file system (NFS/SMB/CephFS) |
+| `pubsub` | Pub/Sub | ⊕ | `#fb923c` | Async message bus |
+| `cloud_function` | Cloud Function | ƒ | `#a78bfa` | Serverless compute |
+| `cron_job` | Cron Job | ◷ | `#34d399` | Schedule-driven task emitter |
+| `worker_pool` | Worker Pool | ⚙ | `#facc15` | Parallel task processing pool |
+| `traffic_generator` | Traffic Generator | ↯ | `#f43f5e` | Injects traffic at configurable RPS |
+| `comment` | Comment | // | `#f59e0b` | Annotation node — no simulation effect |
+
+---
+
+## NodeConfig fields (`src/types/index.ts`)
+
+All fields are optional. Flat bag shared across all component types.
+
+```ts
+// Shared
+label?: string
+
+// CDN
+pops?: number                          // default 2
+cacheablePct?: number                  // default 60
+bandwidthGbps?: number                 // default 100
+
+// Load Balancer
+algorithm?: 'round_robin' | 'least_conn' | 'ip_hash' | 'random' | 'weighted'
+healthChecks?: boolean                 // default true
+maxConnections?: number                // default 100000
+
+// App Server
+instances?: number                     // default 2
+cpuCores?: number                      // default 4
+ramGb?: number                         // default 8
+rpsPerInstance?: number                // default 500
+avgLatencyMs?: number                  // default 40
+
+// App Server — Autoscaling
+autoscalingEnabled?: boolean           // master toggle (default false)
+warmPoolEnabled?: boolean              // warm replica toggle (default false)
+minInstances?: number                  // floor — always running
+maxInstances?: number                  // ceiling — never exceed
+warmPoolSize?: number                  // pre-provisioned instances (instant scale)
+scaleUpCpuPct?: number                 // CPU % that triggers scale-out (default 75)
+scaleDownCpuPct?: number               // CPU % that triggers scale-in (default 25)
+scaleUpCooldownTicks?: number          // ticks between scale-up events (default 4 = 2 s)
+scaleDownCooldownTicks?: number        // ticks before scale-in fires (default 12 = 6 s)
+coldProvisionTicks?: number            // ticks to provision cold instance (default 6 = 3 s)
+
+// Cache
+memoryGb?: number                      // default 8
+ttlSeconds?: number                    // default 60
+evictionPolicy?: 'lru' | 'lfu' | 'noeviction'
+clusterMode?: boolean
+
+// Database
+engine?: 'PostgreSQL' | 'MySQL' | 'MongoDB' | 'Redis' | 'Cassandra'
+instanceType?: string                  // e.g. 'db.m5.large'
+storageGb?: number                     // default 100
+readReplicas?: number                  // default 0
+shards?: number                        // default 1
+rpsPerShard?: number                   // default 800
+maxConnections?: number                // default 200
+
+// Cloud Storage
+storageThroughputMbps?: number         // default 1000
+objectSizeKb?: number                  // default 512
+storageClass?: 'standard' | 'nearline' | 'coldline' | 'archive'
+storageGb?: number
+
+// Block Storage
+diskType?: 'nvme' | 'ssd' | 'hdd'
+iops?: number                          // IOPS limit (default 3000)
+storageGb?: number
+objectSizeKb?: number                  // IO size (default 64)
+
+// Network Storage
+nfsProtocol?: 'nfs' | 'smb' | 'cephfs'
+storageThroughputMbps?: number         // default 500
+connectionLimit?: number               // max simultaneous mounts (default 100)
+objectSizeKb?: number                  // IO size (default 64)
+
+// Pub/Sub
+partitions?: number                    // default 4
+messageRetentionHours?: number         // default 24
+maxMessageSizeKb?: number              // default 10
+
+// Cloud Function
+functionMemoryMb?: number              // default 256
+maxConcurrency?: number                // default 100
+avgExecutionMs?: number                // default 200
+
+// Cron Job
+intervalMinutes?: number               // default 5
+tasksPerRun?: number                   // default 100
+
+// Worker Pool
+workerCount?: number                   // default 4
+threadCount?: number                   // default 4
+taskDurationMs?: number                // default 500
+
+// Traffic Generator
+generatorRps?: number                  // default 1000
+generatorPattern?: TrafficPattern      // default 'steady'
+readRatioPct?: number                  // 0–100, default 50
+
+// Comment
+commentBody?: string
+```
+
+---
+
+## EdgeConfig fields
+
+```ts
+protocol: 'REST' | 'gRPC' | 'TCP' | 'WebSocket'   // default 'REST'
+timeoutMs: number                                   // default 5000
+retryCount: number                                  // default 2
+circuitBreaker: boolean                             // default false
+circuitBreakerThreshold: number                     // default 50
+bandwidthMbps: number                               // default 0 (unlimited)
+splitPct?: number                                   // 0–100; undefined = auto equal-split
+```
+
+---
+
+## NodeMetrics & ComponentDetail (`src/types/index.ts`)
 
 ### NodeMetrics
-Each node gets this shape every tick, plus an optional `detail?: ComponentDetail`.
 
 ```ts
 interface NodeMetrics {
-  rpsIn, rpsOut, load, latencyMs, p99LatencyMs, errorRate, failed
-  readRatio, readRpsIn, writeRpsIn   // read/write split propagated from traffic_generator
-  readLoad?, writeLoad?              // database only
-  detail?: ComponentDetail           // component-specific failure/scaling metrics
+  rpsIn: number
+  rpsOut: number
+  load: number               // 0–1+ (>1 = overloaded)
+  latencyMs: number          // mean latency
+  p99LatencyMs: number       // = latencyMs × 2.5
+  errorRate: number          // 0–1
+  failed: boolean            // load > 1.05
+  readRatio: number          // fraction 0–1 propagated from traffic_generator
+  readRpsIn: number          // rpsIn × readRatio
+  writeRpsIn: number         // rpsIn × (1 − readRatio)
+  readLoad?: number          // database only
+  writeLoad?: number         // database only
+  detail?: ComponentDetail
 }
 ```
 
-### ComponentDetail (discriminated union, `kind` per type)
+### ComponentDetail (discriminated union by `kind`)
 
-| kind | Key fields |
-|------|-----------|
+| `kind` | Fields |
+|--------|--------|
 | `cdn` | `cacheHitRate`, `originBypassRps`, `bandwidthGbps` |
 | `load_balancer` | `activeConnections`, `scalingEvent: boolean`, `connectionsPerSecond` |
 | `app_server` | `cpuPct`, `memPct`, `activeInstances`, `pendingInstances`, `pendingCountdown`, `warmReserve`, `scalingEvent: 'up-warm'\|'up-cold'\|'down'\|null`, `scaleUpCooldown`, `scaleDownCooldown` |
 | `cache` | `hitRate`, `evictionRate`, `memoryUsedPct` |
 | `database` | `connectionPoolUsed`, `connectionPoolMax`, `queryQueueDepth`, `slowQueryRate` |
 | `cloud_storage` | `throttledRequests`, `bandwidthUtilization` |
+| `block_storage` | `iopsUsed`, `iopsLimit`, `queueDepth`, `throughputMbps` |
+| `network_storage` | `activeConnections`, `bandwidthUsedMbps`, `throughputLimitMbps` |
 | `pubsub` | `subscriberLagMs` (stateful), `consumerThroughput`, `unackedMessages` |
 | `cloud_function` | `coldStarts` (stateful), `throttledInvocations`, `concurrencyUsed` |
 | `cron_job` | `overlapCount`, `lastRunDurationMs` |
 | `worker_pool` | `queueDepth` (stateful), `workerUtilization`, `taskBacklogMs` |
 
-### NodeConfig
-Flat bag of optional fields for all component types. Key autoscaling fields for `app_server`:
-- `minInstances`, `maxInstances`, `warmPoolSize`
-- `scaleUpCpuPct` (default 75), `scaleDownCpuPct` (default 25)
-- `scaleUpCooldownTicks` (default 4), `scaleDownCooldownTicks` (default 12)
-- `coldProvisionTicks` (default 6 = 3 s)
-
 ---
 
-## Simulation engine (`src/simulation/SimulationEngine.ts`)
+## SimulationEngine contract (`src/simulation/SimulationEngine.ts`)
 
 Pure TypeScript — no React imports.
 
-### Tick signature
 ```ts
-runSimulationTick(
-  topology: Topology,
-  incomingRps: number,
+export function runSimulationTick(
+  topology: Topology,            // { nodes, edges, nodeConfigs, edgeConfigs }
+  incomingRps: number,           // global RPS × traffic pattern multiplier
   tick = 0,
-  previousMetrics: Record<string, NodeMetrics> = {}   // ← required for stateful components
-): { nodeMetrics, edgeMetrics }
+  previousMetrics: Record<string, NodeMetrics> = {}   // required for stateful components
+): { nodeMetrics: Record<string, NodeMetrics>; edgeMetrics: Record<string, EdgeMetrics> }
 ```
 
-`previousMetrics` **must** be passed from `simulationStore` on every tick so stateful components work correctly.
+### Processing order
 
-### Per-type tick functions (inside the main `switch(type)`)
+1. `buildAdjacency` — downstream/upstream maps + cycle detection via DFS (WHITE/GRAY/BLACK coloring)
+2. `topoSort` — Kahn's BFS; returns nodes in processing order and source node set
+3. BFS traversal in topological order computing per-node metrics
+4. Edge metrics pass: `rps = sourceMetric.rpsOut`, `isBottleneck = load > 0.9`
 
-Each component type has a dedicated case that computes `rpsOut`, `detail`, and optionally overrides `load`, `failed`, `latencyMs`, `errorRate`. The variables `load`, `failed`, `errorRate` are all `let` so they can be reassigned inside cases.
+### RPS sourcing rules
 
-**Stateful components** (read previous detail from `prevNodeMetrics`):
-- `pubsub` — `subscriberLagMs` accumulates when producers > consumer throughput
-- `cloud_function` — `coldStarts` triggered by concurrency growth from prev tick
-- `worker_pool` — `queueDepth` accumulates at (rpsIn − capacity) × 0.5 per tick
-- `app_server` — **autoscaling FSM** (see below)
+- `traffic_generator` — uses own `generatorRps × pattern multiplier`
+- `cron_job` — `tasksPerRun / (intervalMinutes × 60)` fixed rate; ignores global RPS
+- Other nodes with no upstream — receive `incomingRps`
+- All other nodes — sum upstream contributions weighted by `splitPct`
 
-### App Server autoscaling FSM
+### load / failed / errorRate pattern
 
-Per tick:
-1. Promote pending cold instances if `pendingCountdown` reached 0
-2. Decrement cooldown counters
-3. Compute `effectiveCap = activeInstances × perInstanceRps`; override `load`
-4. Scale-up decision: `cpuPct > scaleUpCpuPct` → warm pool first (instant), else cold (+countdown)
-5. Scale-down decision: `cpuPct < scaleDownCpuPct` → decrement activeInstances, refill warm pool
-6. All state (instances, countdowns, warmReserve) stored in `detail` and threaded to next tick
+```ts
+let load = rpsIn / capacity          // overridden per-type in switch
+let failed = load > 1.05
+let errorRate = 0                    // at load < 0.9
+                                     // linear ramp 0→1 at load 0.9→1.2
+```
 
-### Capacity formulas
+`load`, `failed`, `errorRate` are `let` so per-type cases can reassign them.
+
+### Latency
+
+```ts
+baseLatency = computeBaseLatency(type, config)
+queueingFactor = Math.pow(Math.min(load, 2.0), 2) * 200
+latencyMs = baseLatency + queueingFactor
+// per-type cases may add: ioWaitMs, pool-exhaustion penalty, cold-start penalty
+p99LatencyMs = latencyMs * 2.5      // always computed at end
+```
+
+### Downstream IO wait (`computeDownstreamIoWaitMs`)
+
+Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick latency of downstream stores (`database`, `cache`, `block_storage`, `network_storage`, `cloud_storage`). Each store contributes `prevLatencyMs × ioFraction` where `ioFraction = 0.2` for cache, `0.5` for all others. Models Little's Law back-pressure.
+
+---
+
+## Capacity formulas
 
 | Type | Formula |
 |------|---------|
-| CDN | `pops × 25,000` |
-| Load Balancer | 50,000 fixed |
-| App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (static; overridden by autoscaling FSM) |
-| Cache | 100,000 fixed |
+| CDN | `pops × 25000` |
+| Load Balancer | `50000` fixed |
+| App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (static); overridden by FSM |
+| Cache | `100000` fixed |
 | Database | `shards × rpsPerShard + readReplicas × rpsPerShard` |
-| Cloud Storage | `(throughputMbps × 1000/8) / objectSizeKb` |
-| Pub/Sub | `partitions × 5,000` |
+| Cloud Storage | `(throughputMbps × 1000/8) / objectSizeKb` ops/sec |
+| Block Storage | `iops` |
+| Network Storage | `(throughputMbps × 1000/8) / ioSizeKb` ops/sec |
+| Pub/Sub | `partitions × 5000` |
 | Cloud Function | `maxConcurrency × (1000/execMs) × sqrt(memMb/256)` |
+| Cron Job | `∞` (pure emitter) |
 | Worker Pool | `workerCount × threadCount × (1000/taskDurationMs)` |
+| Traffic Generator | `∞` (pure source) |
 
-### Read/write ratio propagation
-- `traffic_generator` seeds `readRatio = readRatioPct / 100`
-- Each downstream node receives a weighted average read ratio from its upstream edges
-- `cdn` and `cache` apply read-specific hit-rate logic to read traffic only
+### Base latencies (ms)
+
+| Type | Base | Config override |
+|------|------|----------------|
+| CDN | 5 | — |
+| Load Balancer | 2 | — |
+| App Server | 40 | `avgLatencyMs` |
+| Cache | 1 | — |
+| Database | 10 | — |
+| Cloud Storage | 20 | `storageClass`: standard=20, nearline=50, coldline=100, archive=500 |
+| Block Storage | 1 | `diskType`: nvme=0.2, ssd=1, hdd=5 |
+| Network Storage | 5 | `nfsProtocol`: nfs=5, smb=8, cephfs=3 |
+| Pub/Sub | 5 | — |
+| Cloud Function | 200 | `avgExecutionMs` |
+| Worker Pool | 0 | `taskDurationMs` |
+| Cron Job | 0 | — |
+| Traffic Generator | 0 | — |
+
+---
+
+## Per-component tick behavior
+
+### CDN
+Cache hit rate = `(cacheablePct/100) × max(0.4, 1 − degradation)` where degradation rises above 80% load. Reads absorbed by hit rate; writes pass through. `rpsOut = non-hit reads + writes − drops`.
+
+### Load Balancer
+Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at `maxConnections`. Sets `scalingEvent = true` when `load > 0.75`.
+
+### App Server (static, `autoscalingEnabled = false`)
+`effectiveCap = instances × perInstRps × ioScale`. IO wait from downstream stores added to latency.
+
+### App Server (autoscaling FSM)
+See "App Server Autoscaling FSM" section below.
+
+### Cache
+Hit rate scales with `memoryGb` (up to 85%). Under load, eviction rate rises above 80% memory used, degrading hit rate. Reads absorbed by hit rate; writes pass through.
+
+### Database
+Separate read/write loads: reads served by primary + replicas, writes by primary only. `load = max(readLoad, writeLoad)`. Connection pool = `(shards + replicas) × 100`. Query queue depth adds latency. Slow query rate rises above 60% load.
+
+### Cloud Storage
+~10% of RPS emitted downstream as event notifications. `throttledRequests = max(0, rpsIn - capacity)`. Bandwidth utilization tracked.
+
+### Block Storage
+**Stateful** `queueDepth` accumulates at `(rpsIn - iopsLimit) × 0.5` per tick. Queue depth adds up to 1000 ms latency.
+
+### Network Storage
+Bandwidth-limited. `activeConnections ≈ ceil(rpsIn / 10)`, capped at `connectionLimit`. Connection saturation (≥90% of limit) adds 50 ms × utilization to latency.
+
+### Pub/Sub
+**Stateful** `subscriberLagMs` accumulates at `((rpsIn - capacity) / capacity) × 500` ms per tick. `unackedMessages ≈ subscriberLagMs × capacity / 1000`.
+
+### Cloud Function
+IO wait inflates `effectiveExecMs`. Capacity recalculated with inflated exec time. **Stateful** `coldStarts ≈ max(0, concurrencyUsed - prevConcurrencyUsed) × 0.8`. Cold starts add up to 400 ms. Throttled invocations when demand exceeds `maxConcurrency`.
+
+### Cron Job
+`rpsIn = tasksPerRun / (intervalMinutes × 60)`. `rpsOut = rpsIn`. `overlapCount > 0` when `lastRunDurationMs > intervalMs`.
+
+### Worker Pool
+**Stateful** `queueDepth` accumulates at `(rpsIn - effectiveCap) × 0.5` per tick. IO wait inflates `effectiveTaskMs`. `taskBacklogMs = queueDepth / effectiveCap × 1000`. Backlog adds up to 5000 ms latency.
+
+---
+
+## App Server Autoscaling FSM
+
+Only active when `autoscalingEnabled = true`. State threads through `detail` via `previousMetrics` each tick.
+
+### Per-tick order
+
+1. **Promote pending**: decrement `pendingCountdown`; when it reaches 0, move `pendingInstances` to `activeInstances` (clamped to `maxInst`)
+2. **Decrement cooldowns**: `scaleUpCooldown--`, `scaleDownCooldown--`
+3. **Compute load**: `effectiveCap = activeInstances × perInstRps × ioScale`; `cpuPct = min(100, dynamicLoad × 90)`
+4. **Scale-up**: if `cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst`:
+   - Warm available (`warmPoolEnabled && warmReserve > 0`) → instant: `activeInstances++`, `warmReserve--`, event = `'up-warm'`
+   - Otherwise → cold: `pendingInstances = 1`, `pendingCountdown = coldProvisionTicks`, event = `'up-cold'`
+   - Set `scaleUpCooldown = scaleUpCooldownTicks`
+5. **Scale-down**: if `cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst`:
+   - `activeInstances--`, optionally refill `warmReserve`, event = `'down'`
+   - Set `scaleDownCooldown = scaleDownCooldownTicks`
+
+---
+
+## Traffic patterns
+
+Defined identically in `SimulationEngine.ts` and `simulationStore.ts` (kept in sync manually).
+
+| Pattern | Multiplier | Behavior |
+|---------|-----------|----------|
+| `steady` | `1.0` | Constant baseline |
+| `ramp` | `min(1 + (tick/60)×0.6, 1.6)` | Grows 60% over ~60 ticks (30 s) then holds |
+| `spike` | `3.5` for ticks 0–4 of each 30-tick cycle, `0.35` otherwise | Burst every 15 s |
+| `wave` | `0.5 + 0.5×sin(tick/20×2π)` | Sinusoidal 0→1 wave |
+| `chaos` | `0.3 + random×1.4` | Random 0.3×–1.7× each tick |
+
+`traffic_generator` nodes have their own `generatorPattern` field. The global pattern in `simulationStore` applies to the overall `peakRps` scale.
 
 ---
 
 ## Simulation store (`src/store/simulationStore.ts`)
 
-- Tick interval: **500ms**
+- Tick interval: **500 ms**
 - Passes `get().nodeMetrics` as `previousMetrics` to `runSimulationTick`
-- Keeps last **40 points** of RPS history per node
-- Generates log events: generic (overload/recovery/75%-warn) + component-specific:
-  - `pubsub`: subscriber lag > 2 s
-  - `cloud_function`: cold starts, throttling
-  - `database`: connection pool exhausted
-  - `worker_pool`: task backlog > 2 s
-  - `app_server`: scale events (warm/cold/down) at `k8s` log level
-  - `load_balancer`: auto-scale signal
+- RPS history: last **40 points** per node
+- Event log: last **100 events**; levels: `'info'`, `'warn'`, `'error'`, `'k8s'`
+
+### Event generation triggers
+
+| Condition | Level | Note |
+|-----------|-------|------|
+| `!prev.failed && m.failed` | error | Overload onset |
+| `prev.failed && !m.failed` | info | Recovery |
+| load crosses 75% threshold | warn | Approaching capacity |
+| pubsub lag crosses 2000 ms | warn | Consumers falling behind |
+| cloud_function cold starts appear | warn | Concurrency ramp |
+| cloud_function throttled invocations appear | error | Max concurrency reached |
+| database queryQueueDepth goes from 0 to >0 | error | Connection pool exhausted |
+| worker_pool backlog crosses 2000 ms | warn | Queue depth included |
+| app_server scalingEvent changes | k8s | warm/cold/down message |
+| load_balancer scalingEvent fires | k8s | Auto-scale signal |
 
 ---
 
 ## Adding a new component type
 
-1. Add the string literal to `ComponentType` in `types/index.ts`
-2. Add a `ComponentDetail` variant if it has unique metrics
-3. Add NodeConfig fields if configurable
-4. Add a `ComponentDefinition` entry in `constants/components.ts` with icon/color/defaults
+1. Add the string literal to `ComponentType` in `src/types/index.ts`
+2. Add a `ComponentDetail` variant with `kind` field if it needs unique per-tick metrics
+3. Add `NodeConfig` fields if configurable
+4. Add a `ComponentDefinition` entry in `src/constants/components.ts` with icon/color/defaults
 5. Create `src/components/canvas/nodes/YourTypeNode.tsx`
 6. Create `src/components/inspector/fields/YourTypeFields.tsx`
-7. Register the node type in `Canvas.tsx`
-8. Add the type to `Inspector.tsx` field dispatch
-9. Add a `case 'your_type':` in the `switch(type)` in `SimulationEngine.ts`
-10. Handle `computeCapacity` and `computeBaseLatency` for the new type
+7. Register the node type in `Canvas.tsx` (`nodeTypes` map)
+8. Add the type to `Inspector.tsx` field dispatch switch
+9. Add `case 'your_type':` in `SimulationEngine.ts`:
+   - Set `rpsOut`
+   - Override `load`, `failed`, `errorRate`, `latencyMs` if needed
+   - Set `detail` if the type has a `ComponentDetail` variant
+   - Add cases in `computeCapacity` and `computeBaseLatency`
+10. Thread stateful components by reading `prevNodeMetrics?.detail` and storing state in `detail`
+11. Add event generation in `simulationStore.ts` if the type has component-specific failure events
+
+---
+
+## Known gotchas
+
+- **`'use client'`** — any component using hooks, browser APIs, or React Flow must have this directive at the top. Missing it causes Next.js SSR errors.
+- **Default exports only** — all components use default exports. Named exports for components break the project convention.
+- **CSS import order** — Google Fonts `@import` in `globals.css` must precede `@tailwindcss/postcss`. Reversing breaks font loading.
+- **React Flow node registration** — every new `ComponentType` must be added to the `nodeTypes` object in `Canvas.tsx`. Missing registration causes React Flow to render a generic fallback node.
+- **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
+- **Traffic pattern sync** — `getTrafficMultiplier` is duplicated in both `SimulationEngine.ts` and `simulationStore.ts`. Changing one requires updating the other.
+- **`p99LatencyMs = latencyMs × 2.5`** — fixed multiplier, computed at end of each node's tick.

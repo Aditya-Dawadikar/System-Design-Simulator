@@ -1,137 +1,114 @@
 # System Design Simulator
 
-
-An interactive web simulator for visualizing, designing, and experimenting with distributed system architectures. Built with Next.js 16 (App Router), React 19, Zustand 5, React Flow 11, and Tailwind CSS v4.
+An interactive web simulator for visualizing, designing, and stress-testing distributed system architectures in real time.
 
 ---
 
 ![System Design Simulator Demo](./views/sys_design_sim.gif)
 
+---
+
 ## Features
 
+- **Drag-and-drop canvas** — build architectures from 14 component types; connect them with configurable edges
+- **Live simulation** — 500 ms tick loop models traffic propagation, queueing, failures, and autoscaling across the full graph
+- **Per-node metrics** — RPS in/out, mean and P99 latency, load gauge, error rate, and component-specific detail metrics
+- **Autoscaling FSM** — app servers scale warm (instant) or cold (countdown), with configurable thresholds and cooldowns
+- **Stateful components** — pub/sub subscriber lag, worker pool queue depth, cloud function cold starts, and block storage IOPS queues all accumulate across ticks
+- **Traffic patterns** — steady, ramp, spike, wave, and chaos multipliers applied per-tick
+- **Read/write ratio propagation** — traffic generators seed a read ratio that flows downstream; databases compute separate read and write loads
+- **Downstream IO back-pressure** — slow databases and storage nodes inflate app server and worker pool latency via Little's Law
+- **Edge configuration** — protocol, timeout, retry, circuit breaker, and per-edge traffic split (%)
+- **Event log** — real-time stream of info, warn, error, and k8s-level events with component context
+- **Inspector panel** — click any node or edge to configure it; changes take effect on the next tick
+- **Collapsible sidebar** — component library with drag handles for all node types
+- **Draggable/resizable dashboard** — metrics panel floats over the canvas, resize vertically
 
-## Features
-
-- **Drag-and-drop Canvas:** Build architectures with a wide range of node types (App Server, Database, Cache, CDN, Load Balancer, Cloud Function, Pub/Sub, Worker Pool, Cron Job, Traffic Generator, and more). Connect them with edges.
-- **Live Simulation:** Simulate traffic, failures, autoscaling, and observe real-time metrics (RPS, latency, error rate, load, scaling events, etc).
-- **Metrics Dashboard:** View global and per-node metrics, sparklines, and event logs. Dashboard is draggable and resizable.
-- **Context Menus:** Right-click nodes/edges for quick actions (delete, inspect, etc).
-- **Customizable Nodes:** Node RPS and capacity depend on realistic parameters (RAM, CPU, concurrency, etc). Supports autoscaling FSM for app servers.
-- **Event Log:** Track simulation events, warnings, errors, and component-specific events in real time.
-- **Modern UI:** Dark terminal/datacenter aesthetic with glassy panels, JetBrains Mono, and smooth interactions.
+---
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+
-- npm or yarn
+- npm
 
-### Installation
+### Install
+
 ```bash
 npm install
-# or
-yarn install
 ```
 
-### Running the App
+### Run
+
 ```bash
 npm run dev
-# or
-yarn dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## Project Structure
-
-
-## Architecture & Source Layout
-
-```
-src/
-├── app/                        # Next.js App Router (layout, page, global styles)
-├── components/
-│   ├── canvas/                 # React Flow canvas, node & edge components
-│   ├── inspector/              # Inspector panels for node configs
-│   ├── shared/                 # ArcGauge, Sparkline, StatCell, Badge, etc.
-│   ├── sidebar/                # ComponentLibrary drag-source
-│   └── simulation/             # Metrics dashboard, event log, controls
-├── constants/                  # Component definitions (icons, colors, defaults)
-├── simulation/                 # Pure TypeScript simulation engine
-├── store/                      # Zustand stores (architecture & simulation)
-├── templates/                  # Default architecture templates
-└── types/                      # All shared TypeScript types
-```
-
-### Key Conventions
-- All interactive components must have `'use client'` at the top
-- All components use **default exports**
-- Path alias `@/` maps to `src/`
-- `globals.css` must import Google Fonts **before** Tailwind
-- Uses CSS variables for theming: `--bg-base`, `--bg-panel`, `--border`, `--text`, `--accent-*`
-- All node types registered in `Canvas.tsx`; custom edge type is `'wire'`
-
-## Customization
-
-## Simulation Engine
-- Pure TypeScript (no React imports)
-- 500ms tick loop, stateful simulation (autoscaling, lag, cold starts, etc)
-- All per-type logic in `SimulationEngine.ts` (see comments for extension points)
-- Passes previous metrics for stateful components
-- Autoscaling FSM for app servers (warm/cold pool, cooldowns, pending, etc)
-- Capacity formulas per type (see CLAUDE.md for details)
-
-## Component Failure Modes & Scaling Logic
-
-| Component         | Failure Mode(s)                                                                 | Scaling Logic / Statefulness                                                                                 |
-|-------------------|---------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| **CDN**           | Overload: cache hit rate degrades, origin bypass increases, errors if load > 1.2 | No scaling; stateless. Cache hit rate drops under high load.                                                |
-| **Load Balancer** | Overload: drops requests above capacity, signals downstream to scale             | No scaling itself; emits scalingEvent when load > 75%. Tracks active connections.                           |
-| **App Server**    | Overload: requests dropped, error rate rises, latency spikes                    | **Autoscaling FSM:**
-|                   |                                                                                 | - Scales up if CPU > threshold (warm pool first, else cold provision)
-|                   |                                                                                 | - Scales down if CPU < threshold
-|                   |                                                                                 | - State: active, pending, warm reserve, cooldowns, scalingEvent                                             |
-| **Cache**         | Overload: hit rate drops, eviction rate rises, errors if load > 1.2             | No scaling; stateless. Hit rate and eviction rate degrade under high load/memory pressure.                  |
-| **Database**      | Overload: connection pool exhaustion, query queue grows, slow queries, errors    | No scaling; stateless. Separate read/write load. Connection pool and query queue depth tracked.             |
-| **Cloud Storage** | Overload: throttled requests, bandwidth utilization hits 100%                   | No scaling; stateless. Throttled requests and bandwidth utilization tracked.                                |
-| **Pub/Sub**       | Overload: subscriber lag accumulates, unacked messages grow                     | **Stateful:** subscriberLagMs accumulates if producers > consumers. No scaling.                             |
-| **Cloud Function**| Overload: throttled invocations, cold starts, latency spikes                    | **Stateful:** coldStarts triggered by concurrency growth. No scaling. Tracks concurrency/throttling.        |
-| **Cron Job**      | Overlap: last run duration exceeds interval                                     | No scaling; stateless. Tracks overlapCount and lastRunDurationMs.                                           |
-| **Worker Pool**   | Overload: queueDepth grows, task backlog increases, latency spikes              | **Stateful:** queueDepth accumulates if inflow > capacity. No scaling. Tracks backlog and utilization.      |
-| **Traffic Gen.**  | N/A (source node)                                                               | No scaling; stateless. Emits traffic with configurable pattern.                                             |
-| **Comment**       | N/A (annotation only)                                                           | No scaling; stateless. No simulation effect.                                                                |
-
-**Notes:**
-- All components are considered overloaded if `load > 1.05` (requests dropped, error rate rises).
-- Autoscaling is implemented only for App Server nodes (see "Autoscaling FSM").
-- Stateful components: App Server (scaling), Pub/Sub (lag), Cloud Function (cold starts), Worker Pool (queue).
-- See `src/simulation/SimulationEngine.ts` and `CLAUDE.md` for full logic details.
-
-## Contributing
-
-## Extending the Simulator
-
-To add a new component type:
-1. Add the string literal to `ComponentType` in `types/index.ts`
-2. Add a `ComponentDetail` variant if it has unique metrics
-3. Add NodeConfig fields if configurable
-4. Add a `ComponentDefinition` entry in `constants/components.ts`
-5. Create `src/components/canvas/nodes/YourTypeNode.tsx`
-6. Create `src/components/inspector/fields/YourTypeFields.tsx`
-7. Register the node type in `Canvas.tsx`
-8. Add the type to `Inspector.tsx` field dispatch
-9. Add a `case 'your_type':` in the `switch(type)` in `SimulationEngine.ts`
-10. Handle `computeCapacity` and `computeBaseLatency` for the new type
+Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
-## Contributing
-Pull requests and issues are welcome! Please open an issue to discuss major changes.
+## How to use
 
-## License
-MIT
+1. **Drag** a component from the sidebar onto the canvas
+2. **Connect** components by dragging from one node's handle to another
+3. **Configure** any node or edge by clicking it — the inspector opens on the right
+4. **Start** the simulation with the Run button in the controls bar
+5. **Read metrics** in the dashboard panel: global RPS, E2E latency, error rate, and per-node cards with sparklines
+6. **Watch the event log** for scaling events, overload alerts, and component-specific warnings
 
-For detailed descriptions and usage instructions for each component, see [COMPONENTS.md](./COMPONENTS.md).
+---
 
-For planned and in-progress component work, see [TODO.md](./TODO.md).
+## Component reference
+
+| Icon | Name | Key config | What it simulates |
+|------|------|-----------|-------------------|
+| ◎ | CDN Edge | POPs, cacheable %, bandwidth | Cache hit rate degrades under load; origin bypass RPS tracked |
+| ⇌ | Load Balancer | Algorithm, max connections | Distributes traffic; signals scale-out when load > 75% |
+| ◈ | App Server | Instances, CPU, RAM, autoscaling | Compute with optional warm/cold autoscaling FSM; IO wait back-pressure |
+| ⚡ | Redis Cache | Memory GB, TTL, eviction policy | Hit rate absorbs reads; eviction rate degrades hit rate under load |
+| ▣ | Database | Engine, shards, replicas, RPS/shard | Separate read/write loads; connection pool exhaustion; slow queries |
+| ◫ | Cloud Storage | Throughput Mbps, object size, storage class | Throttled requests; bandwidth utilization; class-dependent latency |
+| ▤ | Block Storage | Disk type, IOPS limit | Stateful IOPS queue depth; disk-type-dependent latency (NVMe/SSD/HDD) |
+| ⊜ | Network Storage | Protocol, throughput, connection limit | Bandwidth-limited; connection saturation adds latency (NFS/SMB/CephFS) |
+| ⊕ | Pub/Sub | Partitions, retention | Stateful subscriber lag accumulates when producers outpace consumers |
+| ƒ | Cloud Function | Memory MB, concurrency, exec time | Cold starts on concurrency ramp; throttling at max concurrency |
+| ◷ | Cron Job | Interval, tasks per run | Schedule-driven emitter; overlap count when runs exceed interval |
+| ⚙ | Worker Pool | Workers, threads, task duration | Stateful queue depth; IO-inflated task duration; backlog latency |
+| ↯ | Traffic Generator | RPS, pattern, read ratio % | Injects traffic with configurable pattern and read/write split |
+| // | Comment | Text body | Annotation only — no simulation effect |
+
+---
+
+## Traffic patterns
+
+| Pattern | Behavior | Multiplier |
+|---------|----------|-----------|
+| Steady | Constant load | 1.0× |
+| Ramp | Gradually increases to 1.6× over 30 seconds, then holds | 1.0× → 1.6× |
+| Spike | 3.5× burst for 2.5 s every 15 s, drops to 0.35× between spikes | 3.5× / 0.35× |
+| Wave | Sinusoidal oscillation between 0× and 1× | 0–1× |
+| Chaos | Random multiplier each tick | 0.3×–1.7× |
+
+Traffic generators have their own independent pattern setting.
+
+---
+
+## Tech stack
+
+| Technology | Role |
+|-----------|------|
+| Next.js 16 (App Router) | Framework and server |
+| React 19 | UI |
+| React Flow 11 | Interactive canvas |
+| Zustand 5 | State management (two stores) |
+| Tailwind CSS v4 | Styling |
+| TypeScript 5 | Language |
+| Recharts 3 | Sparkline charts |
+
+---
+
+For full architecture documentation, simulation engine internals, and extension guides, see [CLAUDE.md](./CLAUDE.md).
+
+For planned and in-progress work, see [TODO.md](./TODO.md).
