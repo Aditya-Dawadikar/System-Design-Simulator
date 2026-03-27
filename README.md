@@ -133,3 +133,5 @@ Pull requests and issues are welcome! Please open an issue to discuss major chan
 MIT
 
 For detailed descriptions and usage instructions for each component, see [COMPONENTS.md](./COMPONENTS.md).
+
+For planned and in-progress component work, see [TODO.md](./TODO.md).
