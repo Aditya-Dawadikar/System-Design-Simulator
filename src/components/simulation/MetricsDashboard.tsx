@@ -13,7 +13,6 @@ function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints
   }
   return historyRef.current;
 }
-import SimulationControls from './SimulationControls';
 import NodeMetricCard from './NodeMetricCard';
 import EventLog from './EventLog';
 import { useSimulationStore } from '@/store/simulationStore';
@@ -108,9 +107,6 @@ export default function MetricsDashboard() {
           height: '100%',
         }}
       >
-        {/* Top bar: run controls */}
-        <SimulationControls />
-
         {/* Global metrics row */}
         <div
           style={{
