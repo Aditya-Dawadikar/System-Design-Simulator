@@ -301,6 +301,42 @@ function computeDropRate(load: number): number {
   return Math.max(0, (load - 1.0) * 0.8);
 }
 
+/**
+ * Returns the cumulative IO wait (ms) added to a compute node's effective task
+ * duration by its downstream data stores (database, cache, block/network/cloud
+ * storage).  Uses previous-tick metrics so it is available on the current tick
+ * without a second pass; the first tick always returns 0.
+ *
+ * Each store contributes `prevLatencyMs × ioFraction` where ioFraction models
+ * the average fraction of compute requests that block on that store:
+ *   - cache          → 0.2  (designed for sub-ms access, usually a read path)
+ *   - everything else→ 0.5  (50 % of requests are I/O-bound on the store)
+ */
+function computeDownstreamIoWaitMs(
+  nodeId: string,
+  adj: AdjacencyMap,
+  nodes: Node[],
+  previousMetrics: Record<string, NodeMetrics>
+): number {
+  let ioWaitMs = 0;
+  for (const dsId of (adj.downstream.get(nodeId) ?? [])) {
+    const dsNode = nodes.find((n) => n.id === dsId);
+    const dsType = dsNode?.type as string | undefined;
+    if (
+      dsType !== 'database' &&
+      dsType !== 'cache' &&
+      dsType !== 'block_storage' &&
+      dsType !== 'network_storage' &&
+      dsType !== 'cloud_storage'
+    ) continue;
+    const prevDs = previousMetrics[dsId];
+    if (!prevDs || prevDs.load === 0) continue;
+    const ioFraction = dsType === 'cache' ? 0.2 : 0.5;
+    ioWaitMs += prevDs.latencyMs * ioFraction;
+  }
+  return ioWaitMs;
+}
+
 // ---------------------------------------------------------------------------
 // Edge split helper
 // ---------------------------------------------------------------------------
@@ -515,7 +551,14 @@ export function runSimulationTick(
         // ---- Shared config ----
         const cpuCores   = config.cpuCores       ?? 4;
         const ramGb      = config.ramGb          ?? 8;
-        const perInstRps = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
+        const nominalPerInstRps = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
+
+        // ---- Downstream data-store back-pressure (Little's Law) ----
+        // Threads blocked on slow DB / storage reduce effective per-instance RPS.
+        // effectivePerInstRps = nominal × (baseLatency / (baseLatency + ioWaitMs))
+        const ioWaitMs = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const ioScale  = baseLatency > 0 ? baseLatency / (baseLatency + ioWaitMs) : 1;
+        const perInstRps = nominalPerInstRps * ioScale;
 
         if (!autoscalingEnabled) {
           // ── Static path: fixed instance count, no FSM ──────────────
@@ -528,7 +571,7 @@ export function runSimulationTick(
           load      = dynamicLoad;
           failed    = dynamicLoad > 1.05;
           errorRate = computeErrorRate(dynamicLoad);
-          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
+          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200 + ioWaitMs;
           rpsOut    = rpsIn * (1 - computeDropRate(dynamicLoad));
 
           detail = {
@@ -542,7 +585,6 @@ export function runSimulationTick(
           // ── Autoscaling FSM path ───────────────────────────────────
           const minInst         = config.minInstances         ?? (config.instances ?? 2);
           const maxInst         = config.maxInstances         ?? (config.instances ?? 2) * 4;
-          // Warm pool only active when warmPoolEnabled
           const warmPool        = warmPoolEnabled ? (config.warmPoolSize ?? 0) : 0;
           const scaleUpThr      = config.scaleUpCpuPct          ?? 75;
           const scaleDownThr    = config.scaleDownCpuPct        ?? 25;
@@ -550,11 +592,9 @@ export function runSimulationTick(
           const scaleDownCDConf = config.scaleDownCooldownTicks ?? 12;
           const coldTicks       = config.coldProvisionTicks     ?? 6;
 
-          // Load stateful counters from previous tick
           let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
           let pendingInstances  = prevD?.pendingInstances  ?? 0;
           let pendingCountdown  = prevD?.pendingCountdown  ?? 0;
-          // warmReserve only valid when warmPoolEnabled; otherwise always 0
           let warmReserve       = warmPoolEnabled ? (prevD?.warmReserve ?? warmPool) : 0;
           let scaleUpCooldown   = prevD?.scaleUpCooldown   ?? 0;
           let scaleDownCooldown = prevD?.scaleDownCooldown ?? 0;
@@ -570,7 +610,8 @@ export function runSimulationTick(
           if (scaleUpCooldown   > 0) scaleUpCooldown--;
           if (scaleDownCooldown > 0) scaleDownCooldown--;
 
-          // 3. Dynamic capacity from live active-instance count
+          // 3. Dynamic capacity — IO-scaled perInstRps means a slow DB forces
+          //    cpuPct up even with more instances, correctly showing the DB bottleneck
           const effectiveCap = activeInstances * perInstRps;
           const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
           const cpuPct = Math.min(100, dynamicLoad * 90);
@@ -582,12 +623,10 @@ export function runSimulationTick(
 
           if (cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
             if (warmPoolEnabled && warmReserve > 0) {
-              // Warm instance — activates instantly, no latency penalty
               activeInstances++;
               warmReserve--;
               scalingEvent = 'up-warm';
             } else if (pendingInstances === 0) {
-              // Cold instance — needs coldTicks to become ready
               pendingInstances = 1;
               pendingCountdown = coldTicks;
               scalingEvent = 'up-cold';
@@ -595,17 +634,16 @@ export function runSimulationTick(
             scaleUpCooldown = scaleUpCDConf;
           } else if (cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
             activeInstances--;
-            // Decommissioned instance refills warm pool only when warm pool is enabled
             if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
             scalingEvent = 'down';
             scaleDownCooldown = scaleDownCDConf;
           }
 
-          // 5. Override load / failed / latency / errorRate with dynamic values
+          // 5. Override load / failed / latency / errorRate
           load      = dynamicLoad;
           failed    = dynamicLoad > 1.05;
           errorRate = computeErrorRate(dynamicLoad);
-          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200;
+          latencyMs = baseLatency + Math.pow(Math.min(dynamicLoad, 2.0), 2) * 200 + ioWaitMs;
           rpsOut    = rpsIn * (1 - computeDropRate(dynamicLoad));
 
           detail = {
@@ -614,19 +652,6 @@ export function runSimulationTick(
             warmReserve, scalingEvent,
             scaleUpCooldown, scaleDownCooldown,
           };
-        }
-
-        // Storage I/O backpressure: if this app server is connected to block/network
-        // storage, previous-tick storage latency bleeds into response time (IO-bound ops).
-        for (const dsId of (adj.downstream.get(node.id) ?? [])) {
-          const dsNode = nodes.find((n) => n.id === dsId);
-          if (!dsNode || (dsNode.type !== 'block_storage' && dsNode.type !== 'network_storage')) continue;
-          const prevSt = previousMetrics[dsId];
-          if (!prevSt || prevSt.load === 0) continue;
-          // ~30% of requests touch storage — partial latency bleed
-          latencyMs += prevSt.latencyMs * 0.3;
-          // Saturated storage stalls IO threads → additional penalty
-          if (prevSt.load > 0.9) latencyMs += 25 * Math.min(prevSt.load, 2.0);
         }
         break;
       }
@@ -734,20 +759,32 @@ export function runSimulationTick(
       }
 
       case 'cloud_function': {
-        const dropRate = computeDropRate(load);
+        const maxConcurrency = config.maxConcurrency ?? 100;
+        const baseExecMs     = config.avgExecutionMs ?? 200;
+        const memMb          = config.functionMemoryMb ?? 256;
+        const memFactor      = Math.sqrt(memMb / 256);
+
+        // IO wait from downstream data stores inflates effective execution time
+        const ioWaitMs       = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const effectiveExecMs = baseExecMs + ioWaitMs;
+
+        // Recalculate capacity and load with IO-inflated exec time
+        const effectiveCap = Math.round(maxConcurrency * (1000 / effectiveExecMs) * memFactor);
+        load      = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
+        failed    = load > 1.05;
+        errorRate = computeErrorRate(load);
+        latencyMs = effectiveExecMs + Math.pow(Math.min(load, 2.0), 2) * 200;
+
+        const dropRate        = computeDropRate(load);
         rpsOut = rpsIn * (1 - dropRate);
-        const maxConcurrency = config.maxConcurrency  ?? 100;
-        const execMs         = config.avgExecutionMs  ?? 200;
-        // Instantaneous inflight invocations
-        const concurrencyUsed = Math.min(maxConcurrency, rpsIn * execMs / 1000);
+
+        const concurrencyUsed = Math.min(maxConcurrency, rpsIn * effectiveExecMs / 1000);
         const prevConcurrency = prevNodeMetrics?.detail?.kind === 'cloud_function'
           ? prevNodeMetrics.detail.concurrencyUsed : 0;
-        // Cold starts triggered by rapid concurrency growth (new containers needed)
         const coldStarts = Math.round(Math.max(0, concurrencyUsed - prevConcurrency) * 0.8);
         const throttledInvocations = Math.round(
-          Math.max(0, rpsIn * execMs / 1000 - maxConcurrency) * (1000 / execMs)
+          Math.max(0, rpsIn * effectiveExecMs / 1000 - maxConcurrency) * (1000 / effectiveExecMs)
         );
-        // Cold start latency penalty (container init ~400 ms)
         if (coldStarts > 0) latencyMs += 400 * Math.min(1, coldStarts / 10);
         detail = { kind: 'cloud_function', coldStarts, throttledInvocations, concurrencyUsed };
         break;
@@ -766,17 +803,31 @@ export function runSimulationTick(
       }
 
       case 'worker_pool': {
+        const workers        = config.workerCount   ?? 4;
+        const threads        = config.threadCount   ?? 4;
+        const baseTaskMs     = config.taskDurationMs ?? 500;
+
+        // IO wait from downstream data stores inflates effective task duration
+        const ioWaitMs         = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const effectiveTaskMs  = baseTaskMs + ioWaitMs;
+
+        // Recalculate capacity and load with IO-inflated task duration
+        const effectiveCap = Math.round(workers * threads * (1000 / effectiveTaskMs));
+        load      = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
+        failed    = load > 1.05;
+        errorRate = computeErrorRate(load);
+        latencyMs = effectiveTaskMs + Math.pow(Math.min(load, 2.0), 2) * 200;
+
         const dropRate = computeDropRate(load);
         rpsOut = rpsIn * (1 - dropRate);
-        // Queue depth: stateful — accumulates when inflow > processing capacity
-        const prevQueueDepth = prevNodeMetrics?.detail?.kind === 'worker_pool'
+
+        // Stateful queue depth — uses effective capacity so IO-slowed workers fill queue faster
+        const prevQueueDepth    = prevNodeMetrics?.detail?.kind === 'worker_pool'
           ? prevNodeMetrics.detail.queueDepth : 0;
-        // Δ per 500 ms tick
-        const queueDelta     = (rpsIn - capacity) * 0.5;
-        const queueDepth     = Math.max(0, prevQueueDepth + queueDelta);
+        const queueDelta        = (rpsIn - effectiveCap) * 0.5;
+        const queueDepth        = Math.max(0, prevQueueDepth + queueDelta);
         const workerUtilization = Math.min(100, load * 100);
-        const taskBacklogMs  = capacity > 0 ? (queueDepth / capacity) * 1000 : 0;
-        // Growing backlog increases effective latency (queue-wait time)
+        const taskBacklogMs     = effectiveCap > 0 ? (queueDepth / effectiveCap) * 1000 : 0;
         if (queueDepth > 0) latencyMs += Math.min(5000, taskBacklogMs * 0.1);
         detail = { kind: 'worker_pool', queueDepth, workerUtilization, taskBacklogMs };
         break;
