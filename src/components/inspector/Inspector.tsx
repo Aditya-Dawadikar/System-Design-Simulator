@@ -9,6 +9,8 @@ import AppServerFields from './fields/AppServerFields';
 import CacheFields from './fields/CacheFields';
 import DatabaseFields from './fields/DatabaseFields';
 import CloudStorageFields from './fields/CloudStorageFields';
+import BlockStorageFields from './fields/BlockStorageFields';
+import NetworkStorageFields from './fields/NetworkStorageFields';
 import PubSubFields from './fields/PubSubFields';
 import CloudFunctionFields from './fields/CloudFunctionFields';
 import CronJobFields from './fields/CronJobFields';
@@ -73,6 +75,10 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <DatabaseFields nodeId={nodeId} />;
     case 'cloud_storage':
       return <CloudStorageFields nodeId={nodeId} />;
+    case 'block_storage':
+      return <BlockStorageFields nodeId={nodeId} />;
+    case 'network_storage':
+      return <NetworkStorageFields nodeId={nodeId} />;
     case 'pubsub':
       return <PubSubFields nodeId={nodeId} />;
     case 'cloud_function':

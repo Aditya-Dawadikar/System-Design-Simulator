@@ -47,6 +47,8 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   cache: 1,
   database: 10,
   cloud_storage: 20,     // overridden by storageClass config
+  block_storage: 1,      // overridden by diskType config (NVMe 0.2ms, SSD 1ms, HDD 5ms)
+  network_storage: 5,    // overridden by nfsProtocol config
   pubsub: 5,
   cloud_function: 200,   // overridden by avgExecutionMs config
   cron_job: 0,           // cron_job has no request latency — it's a scheduler
@@ -216,6 +218,17 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       return Math.round((throughputMbps * 1000) / 8 / objectSizeKb);
     }
 
+    case 'block_storage':
+      // Capacity is pure IOPS (each IO op = 1 RPS unit)
+      return config.iops ?? 3000;
+
+    case 'network_storage': {
+      // Bandwidth-limited: throughput in Mbps → IO ops/sec for given IO size
+      const throughputMbps = config.storageThroughputMbps ?? 500;
+      const ioSizeKb = config.objectSizeKb ?? 64;
+      return Math.round((throughputMbps * 1000) / 8 / ioSizeKb);
+    }
+
     case 'pubsub': {
       // Each partition handles messages independently; more partitions = more throughput
       const partitions = config.partitions ?? 4;
@@ -265,6 +278,14 @@ function computeBaseLatency(type: ComponentType, config: NodeConfig): number {
       standard: 20, nearline: 50, coldline: 100, archive: 500,
     };
     return classLatency[config.storageClass ?? 'standard'] ?? 20;
+  }
+  if (type === 'block_storage') {
+    const diskLatency: Record<string, number> = { nvme: 0.2, ssd: 1, hdd: 5 };
+    return diskLatency[config.diskType ?? 'ssd'] ?? 1;
+  }
+  if (type === 'network_storage') {
+    const protoLatency: Record<string, number> = { nfs: 5, smb: 8, cephfs: 3 };
+    return protoLatency[config.nfsProtocol ?? 'nfs'] ?? 5;
   }
   return BASE_LATENCY[type] ?? 10;
 }
@@ -594,6 +615,19 @@ export function runSimulationTick(
             scaleUpCooldown, scaleDownCooldown,
           };
         }
+
+        // Storage I/O backpressure: if this app server is connected to block/network
+        // storage, previous-tick storage latency bleeds into response time (IO-bound ops).
+        for (const dsId of (adj.downstream.get(node.id) ?? [])) {
+          const dsNode = nodes.find((n) => n.id === dsId);
+          if (!dsNode || (dsNode.type !== 'block_storage' && dsNode.type !== 'network_storage')) continue;
+          const prevSt = previousMetrics[dsId];
+          if (!prevSt || prevSt.load === 0) continue;
+          // ~30% of requests touch storage — partial latency bleed
+          latencyMs += prevSt.latencyMs * 0.3;
+          // Saturated storage stalls IO threads → additional penalty
+          if (prevSt.load > 0.9) latencyMs += 25 * Math.min(prevSt.load, 2.0);
+        }
         break;
       }
 
@@ -640,6 +674,46 @@ export function runSimulationTick(
         const bandwidthUtilization = Math.min(100, (bwUsedMbps / throughputMbps) * 100);
         const throttledRequests    = Math.round(Math.max(0, rpsIn - capacity));
         detail = { kind: 'cloud_storage', throttledRequests, bandwidthUtilization };
+        break;
+      }
+
+      case 'block_storage': {
+        const iopsLimit = config.iops ?? 3000;
+        const ioSizeKb  = config.objectSizeKb ?? 64;
+        const dropRate  = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+
+        // Stateful queue depth: accumulates when IOPS demand exceeds limit
+        const prevQueueDepth = prevNodeMetrics?.detail?.kind === 'block_storage'
+          ? prevNodeMetrics.detail.queueDepth : 0;
+        const queueDelta = (rpsIn - iopsLimit) * 0.5;
+        const queueDepth = Math.max(0, prevQueueDepth + queueDelta);
+
+        // Queue depth increases effective latency (each pending IO adds wait time)
+        if (queueDepth > 0) latencyMs += Math.min(1000, queueDepth * 0.5);
+
+        const iopsUsed      = Math.min(iopsLimit, Math.round(rpsIn));
+        const throughputMbps = (rpsIn * ioSizeKb) / (1000 / 8);
+        detail = { kind: 'block_storage', iopsUsed, iopsLimit, queueDepth, throughputMbps };
+        break;
+      }
+
+      case 'network_storage': {
+        const throughputLimit = config.storageThroughputMbps ?? 500;
+        const ioSizeKb        = config.objectSizeKb ?? 64;
+        const connLimit       = config.connectionLimit ?? 100;
+        const dropRate        = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+
+        const bandwidthUsedMbps = (rpsIn * ioSizeKb * 8) / 1000;
+        // Each sustained connection ≈ 10 concurrent requests
+        const activeConnections = Math.min(connLimit, Math.ceil(rpsIn / 10));
+
+        // Connection saturation adds latency (OS-level socket contention)
+        if (activeConnections >= connLimit * 0.9) {
+          latencyMs += 50 * (activeConnections / connLimit);
+        }
+        detail = { kind: 'network_storage', activeConnections, bandwidthUsedMbps, throughputLimitMbps: throughputLimit };
         break;
       }
 

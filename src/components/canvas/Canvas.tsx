@@ -28,6 +28,8 @@ import AppServerNode from './nodes/AppServerNode';
 import CacheNode from './nodes/CacheNode';
 import DatabaseNode from './nodes/DatabaseNode';
 import CloudStorageNode from './nodes/CloudStorageNode';
+import BlockStorageNode from './nodes/BlockStorageNode';
+import NetworkStorageNode from './nodes/NetworkStorageNode';
 import PubSubNode from './nodes/PubSubNode';
 import CloudFunctionNode from './nodes/CloudFunctionNode';
 import CronJobNode from './nodes/CronJobNode';
@@ -45,6 +47,8 @@ export const nodeTypes: NodeTypes = {
   cache: CacheNode,
   database: DatabaseNode,
   cloud_storage: CloudStorageNode,
+  block_storage: BlockStorageNode,
+  network_storage: NetworkStorageNode,
   pubsub: PubSubNode,
   cloud_function: CloudFunctionNode,
   cron_job: CronJobNode,

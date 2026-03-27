@@ -5,6 +5,8 @@ export type ComponentType =
   | 'cache'
   | 'database'
   | 'cloud_storage'
+  | 'block_storage'
+  | 'network_storage'
   | 'pubsub'
   | 'cloud_function'
   | 'cron_job'
@@ -44,6 +46,8 @@ export type ComponentDetail =
   | { kind: 'cache';          hitRate: number; evictionRate: number; memoryUsedPct: number }
   | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number }
   | { kind: 'cloud_storage';  throttledRequests: number; bandwidthUtilization: number }
+  | { kind: 'block_storage';  iopsUsed: number; iopsLimit: number; queueDepth: number; throughputMbps: number }
+  | { kind: 'network_storage'; activeConnections: number; bandwidthUsedMbps: number; throughputLimitMbps: number }
   | { kind: 'pubsub';         subscriberLagMs: number; consumerThroughput: number; unackedMessages: number }
   | { kind: 'cloud_function'; coldStarts: number; throttledInvocations: number; concurrencyUsed: number }
   | { kind: 'cron_job';       overlapCount: number; lastRunDurationMs: number }
@@ -120,6 +124,12 @@ export interface NodeConfig {
   storageThroughputMbps?: number;
   objectSizeKb?: number;
   storageClass?: 'standard' | 'nearline' | 'coldline' | 'archive';
+  // Block Storage
+  diskType?: 'nvme' | 'ssd' | 'hdd';
+  iops?: number;                   // IOPS limit (default 3000)
+  // Network Storage
+  nfsProtocol?: 'nfs' | 'smb' | 'cephfs';
+  connectionLimit?: number;        // max simultaneous mounts
   // Pub/Sub
   partitions?: number;
   messageRetentionHours?: number;

@@ -99,6 +99,33 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     },
   },
   {
+    type: 'block_storage',
+    label: 'Block Storage',
+    icon: '▤',
+    color: '#d97706',
+    description: 'Persistent block volume (NVMe/SSD/HDD)',
+    defaults: {
+      diskType: 'ssd',
+      iops: 3000,
+      storageGb: 100,
+      objectSizeKb: 64,
+    },
+  },
+  {
+    type: 'network_storage',
+    label: 'Network Storage',
+    icon: '⊜',
+    color: '#6366f1',
+    description: 'Shared network file system (NFS/SMB/CephFS)',
+    defaults: {
+      nfsProtocol: 'nfs',
+      storageThroughputMbps: 500,
+      connectionLimit: 100,
+      objectSizeKb: 64,
+      storageGb: 1000,
+    },
+  },
+  {
     type: 'pubsub',
     label: 'Pub/Sub',
     icon: '⊕',
