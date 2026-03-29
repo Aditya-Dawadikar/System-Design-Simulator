@@ -10,7 +10,7 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 
 ## Features
 
-- **Drag-and-drop canvas** — build architectures from 14 component types; connect them with configurable edges
+- **Drag-and-drop canvas** — build architectures from 15 component types; connect them with configurable edges
 - **Live simulation** — 500 ms tick loop models traffic propagation, queueing, failures, and autoscaling across the full graph
 - **Per-node metrics** — RPS in/out, mean and P99 latency, load gauge, error rate, and component-specific detail metrics
 - **Autoscaling FSM** — app servers scale warm (instant) or cold (countdown), with configurable thresholds and cooldowns
@@ -77,6 +77,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | ◷ | Cron Job | Interval, tasks per run | Schedule-driven emitter; overlap count when runs exceed interval |
 | ⚙ | Worker Pool | Workers, threads, task duration | Stateful queue depth; IO-inflated task duration; backlog latency |
 | ↯ | Traffic Generator | RPS, pattern, read ratio % | Injects traffic with configurable pattern and read/write split |
+| ⊘ | Rate Limiter | Algorithm, RPS limit, burst capacity, queue size | Five algorithms (token bucket, leaky bucket, fixed/sliding window, sliding log); stateful queue for bucket algos; throttle rate as error rate |
 | // | Comment | Text body | Annotation only — no simulation effect |
 
 ---

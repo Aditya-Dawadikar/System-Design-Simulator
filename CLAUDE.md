@@ -106,6 +106,7 @@ Defined in `src/constants/components.ts`. The `ComponentType` union in `src/type
 | `cron_job` | Cron Job | ◷ | `#34d399` | Schedule-driven task emitter |
 | `worker_pool` | Worker Pool | ⚙ | `#facc15` | Parallel task processing pool |
 | `traffic_generator` | Traffic Generator | ↯ | `#f43f5e` | Injects traffic at configurable RPS |
+| `rate_limiter` | Rate Limiter | ⊘ | `#c026d3` | Throttles traffic by rate-limiting algorithm |
 | `comment` | Comment | // | `#f59e0b` | Annotation node — no simulation effect |
 
 ---
@@ -129,10 +130,10 @@ healthChecks?: boolean                 // default true
 maxConnections?: number                // default 100000
 
 // App Server
-instances?: number                     // default 2
+instances?: number                     // default 1
 cpuCores?: number                      // default 4
 ramGb?: number                         // default 8
-rpsPerInstance?: number                // default 500
+rpsPerInstance?: number                // default 500 (overrides workload-based nominal in tick; NOT used in computeCapacity)
 avgLatencyMs?: number                  // default 40
 
 workloadType?: 'cpu_bound' | 'io_bound' | 'memory_bound'  // default 'io_bound'
@@ -142,8 +143,8 @@ warmPoolEnabled?: boolean              // warm replica toggle (default false)
 minInstances?: number                  // floor — always running
 maxInstances?: number                  // ceiling — never exceed
 warmPoolSize?: number                  // pre-provisioned instances (instant scale)
-scaleUpCpuPct?: number                 // CPU % that triggers scale-out (default 75)
-scaleDownCpuPct?: number               // CPU % that triggers scale-in (default 25)
+scaleUpCpuPct?: number                 // load% that triggers scale-out (default 75)
+scaleDownCpuPct?: number               // load% that triggers scale-in (default 25)
 scaleUpCooldownTicks?: number          // ticks between scale-up events (default 4 = 2 s)
 scaleDownCooldownTicks?: number        // ticks before scale-in fires (default 12 = 6 s)
 coldProvisionTicks?: number            // ticks to provision cold instance (default 6 = 3 s)
@@ -205,6 +206,13 @@ generatorRps?: number                  // default 1000
 generatorPattern?: TrafficPattern      // default 'steady'
 readRatioPct?: number                  // 0–100, default 50
 
+// Rate Limiter
+rateLimitAlgorithm?: 'token_bucket' | 'leaky_bucket' | 'fixed_window' | 'sliding_window' | 'sliding_log'
+requestsPerSecond?: number             // allowed RPS (default 1000)
+burstCapacity?: number                 // extra requests in burst window (default 200; token_bucket only)
+windowSizeMs?: number                  // window size for window-based algorithms (default 1000)
+maxQueueSize?: number                  // max requests held in queue before dropping (default 500)
+
 // Comment
 commentBody?: string
 ```
@@ -263,6 +271,7 @@ interface NodeMetrics {
 | `cloud_function` | `coldStarts` (stateful), `throttledInvocations`, `concurrencyUsed` |
 | `cron_job` | `overlapCount`, `lastRunDurationMs` |
 | `worker_pool` | `queueDepth` (stateful), `workerUtilization`, `taskBacklogMs` |
+| `rate_limiter` | `allowedRps`, `throttledRps`, `throttleRate`, `queueDepth` (stateful for queuing algos) |
 
 ---
 
@@ -326,7 +335,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 |------|---------|
 | CDN | `pops × 25000` |
 | Load Balancer | `50000` fixed |
-| App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (static); overridden by FSM |
+| App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (used by `computeCapacity`; tick uses `rpsPerInstance` override if set) |
 | Cache | `100000` fixed |
 | Database | `shards × rpsPerShard + readReplicas × rpsPerShard` |
 | Cloud Storage | `(throughputMbps × 1000/8) / objectSizeKb` ops/sec |
@@ -337,6 +346,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Cron Job | `∞` (pure emitter) |
 | Worker Pool | `workerCount × threadCount × (1000/taskDurationMs)` |
 | Traffic Generator | `∞` (pure source) |
+| Rate Limiter | `requestsPerSecond` (placeholder; load overridden in tick) |
 
 ### Base latencies (ms)
 
@@ -355,6 +365,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Worker Pool | 0 | `taskDurationMs` |
 | Cron Job | 0 | — |
 | Traffic Generator | 0 | — |
+| Rate Limiter | 1 | — (minimal bookkeeping overhead) |
 
 ---
 
@@ -371,7 +382,7 @@ Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at
 
 `workloadType` changes three things:
 - **IO wait weight** applied before `ioScale`: `cpu_bound=0.1`, `memory_bound=0.35`, `io_bound=1.0`
-- **Nominal RPS default** (when `rpsPerInstance` not set): `cpu_bound=cpuCores×350`, `memory_bound=min(cpuCores×300, ramGb×100)`, `io_bound=cpuCores×500`
+- **Nominal RPS per instance** (when `rpsPerInstance` not set): `cpu_bound=cpuCores×350`, `memory_bound=min(cpuCores×300, ramGb×100)`, `io_bound=cpuCores×500`
 - **`cpuPct`/`memPct` display**: `cpu_bound` saturates CPU fast; `memory_bound` saturates memory fast; `io_bound` both moderate (threads waiting)
 
 ### App Server (autoscaling FSM)
@@ -404,6 +415,19 @@ IO wait inflates `effectiveExecMs`. Capacity recalculated with inflated exec tim
 ### Worker Pool
 **Stateful** `queueDepth` accumulates at `(rpsIn - effectiveCap) × 0.5` per tick. IO wait inflates `effectiveTaskMs`. `taskBacklogMs = queueDepth / effectiveCap × 1000`. Backlog adds up to 5000 ms latency.
 
+### Rate Limiter
+Five algorithms with different burst/queue behaviors:
+
+| Algorithm | Instant cap | Queuing |
+|-----------|-------------|---------|
+| `token_bucket` | `rpsLimit + burstCapacity` | Yes — excess queued up to `maxQueueSize` |
+| `leaky_bucket` | `rpsLimit` | Yes — excess queued up to `maxQueueSize` |
+| `fixed_window` | `rpsLimit × 1.5` | No — excess immediately dropped (429) |
+| `sliding_window` | `rpsLimit × 1.2` | No — excess immediately dropped (429) |
+| `sliding_log` | `rpsLimit` | No — excess immediately dropped; +2 ms bookkeeping |
+
+`rpsOut` is always hard-capped at `requestsPerSecond` regardless of algorithm. **Stateful** queue for `token_bucket` and `leaky_bucket`. `load` = queue fill fraction (queuing algos) or `rpsIn / instantCap` (window algos). `errorRate = throttleRate`.
+
 ---
 
 ## App Server Autoscaling FSM
@@ -414,14 +438,16 @@ Only active when `autoscalingEnabled = true`. State threads through `detail` via
 
 1. **Promote pending**: decrement `pendingCountdown`; when it reaches 0, move `pendingInstances` to `activeInstances` (clamped to `maxInst`)
 2. **Decrement cooldowns**: `scaleUpCooldown--`, `scaleDownCooldown--`
-3. **Compute load**: `effectiveCap = activeInstances × perInstRps × ioScale`; `cpuPct = min(100, dynamicLoad × 90)`
-4. **Scale-up**: if `cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst`:
+3. **Compute load**: `effectiveCap = activeInstances × perInstRps × ioScale`; `loadPct = dynamicLoad × 100`
+4. **Scale-up**: if `loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst`:
    - Warm available (`warmPoolEnabled && warmReserve > 0`) → instant: `activeInstances++`, `warmReserve--`, event = `'up-warm'`
    - Otherwise → cold: `pendingInstances = 1`, `pendingCountdown = coldProvisionTicks`, event = `'up-cold'`
    - Set `scaleUpCooldown = scaleUpCooldownTicks`
-5. **Scale-down**: if `cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst`:
+5. **Scale-down**: if `loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst`:
    - `activeInstances--`, optionally refill `warmReserve`, event = `'down'`
    - Set `scaleDownCooldown = scaleDownCooldownTicks`
+
+**Note**: The scale trigger uses `loadPct` (not `cpuPct`) so `io_bound` and `memory_bound` workloads scale correctly — `cpuPct` for `io_bound` only reaches ~50% at full load, which would never cross a 75% threshold.
 
 ---
 
@@ -491,6 +517,8 @@ Defined identically in `SimulationEngine.ts` and `simulationStore.ts` (kept in s
 - **Default exports only** — all components use default exports. Named exports for components break the project convention.
 - **CSS import order** — Google Fonts `@import` in `globals.css` must precede `@tailwindcss/postcss`. Reversing breaks font loading.
 - **React Flow node registration** — every new `ComponentType` must be added to the `nodeTypes` object in `Canvas.tsx`. Missing registration causes React Flow to render a generic fallback node.
-- **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
+- **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`, `rate_limiter`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
 - **Traffic pattern sync** — `getTrafficMultiplier` is duplicated in both `SimulationEngine.ts` and `simulationStore.ts`. Changing one requires updating the other.
 - **`p99LatencyMs = latencyMs × 2.5`** — fixed multiplier, computed at end of each node's tick.
+- **Autoscaling scale trigger uses `loadPct`, not `cpuPct`** — `scaleUpCpuPct`/`scaleDownCpuPct` config fields are compared against `dynamicLoad × 100`, not the displayed `cpuPct`. This is intentional so IO-bound workloads scale correctly.
+- **`computeCapacity` vs tick capacity** — `computeCapacity` for `app_server` uses `min(cpuCores, ramGb×0.5) × 300` and ignores `rpsPerInstance`. The tick case uses `rpsPerInstance` if set. These can diverge; the tick value is what actually determines simulation behavior.
