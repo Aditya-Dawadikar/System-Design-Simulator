@@ -13,6 +13,17 @@ function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints
   }
   return historyRef.current;
 }
+
+// --- Global error-rate history hook (max node errorRate) ---
+function useGlobalErrorRateHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints = 100) {
+  const historyRef = useRef<number[]>([]);
+  const all = Object.values(nodeMetrics);
+  const maxErrorRate = all.length === 0 ? 0 : Math.max(...all.map((m) => m.errorRate || 0));
+  if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== maxErrorRate) {
+    historyRef.current = [...historyRef.current.slice(-maxPoints + 1), maxErrorRate];
+  }
+  return historyRef.current;
+}
 import NodeMetricCard from './NodeMetricCard';
 import EventLog from './EventLog';
 import { useSimulationStore } from '@/store/simulationStore';
@@ -83,6 +94,7 @@ export default function MetricsDashboard() {
   const nodes       = useArchitectureStore((s) => s.nodes);
   const global = useMemo(() => computeGlobalMetrics(nodeMetrics), [nodeMetrics]);
   const globalRpsHistory = useGlobalRpsHistory(nodeMetrics, 100);
+  const globalErrorHistory = useGlobalErrorRateHistory(nodeMetrics, 100);
 
   return (
     <div
@@ -145,7 +157,7 @@ export default function MetricsDashboard() {
         {/* Global traffic tail curve visualization */}
         <div style={{
           width: '100%',
-          height: 36,
+          height: 40,
           background: 'transparent',
           padding: '0 16px',
           display: 'flex',
@@ -153,7 +165,18 @@ export default function MetricsDashboard() {
           borderBottom: '1px solid var(--border)',
         }}>
           <span style={{ color: 'var(--border)', fontSize: 11, marginRight: 12, minWidth: 60 }}>TRAFFIC</span>
-          <Sparkline data={globalRpsHistory} color="var(--accent-cyan)" width={320} height={28} />
+          <div style={{ position: 'relative', width: 320, height: 28, flexShrink: 0 }}>
+            <div style={{ position: 'absolute', inset: 0 }}>
+              <Sparkline data={globalRpsHistory} color="var(--accent-cyan)" width={320} height={28} />
+            </div>
+            <div style={{ position: 'absolute', inset: 0, opacity: 0.95 }}>
+              <Sparkline data={globalErrorHistory} color="var(--accent-red)" width={320} height={28} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginLeft: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 10, color: 'var(--accent-cyan)' }}>RPS</span>
+            <span style={{ fontSize: 10, color: 'var(--accent-red)' }}>ERR {(global.errRate * 100).toFixed(1)}%</span>
+          </div>
         </div>
 
         {/* Per-node cards, vertically scrollable */}
