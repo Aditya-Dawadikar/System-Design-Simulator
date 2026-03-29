@@ -636,10 +636,14 @@ export function runSimulationTick(
           const { cpuPct, memPct } = computeResourcePcts(dynamicLoad);
 
           // 4. Scaling decision
+          // Use load% (not cpuPct) as the trigger so io_bound and memory_bound
+          // workloads scale correctly — cpuPct for io_bound only reaches ~50 at
+          // full load, which would never cross the 75% threshold.
+          const loadPct = dynamicLoad * 100;
           let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
           const totalProvisioned = activeInstances + pendingInstances;
 
-          if (cpuPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+          if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
             if (warmPoolEnabled && warmReserve > 0) {
               activeInstances++;
               warmReserve--;
@@ -650,7 +654,7 @@ export function runSimulationTick(
               scalingEvent = 'up-cold';
             }
             scaleUpCooldown = scaleUpCDConf;
-          } else if (cpuPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+          } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
             activeInstances--;
             if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
             scalingEvent = 'down';

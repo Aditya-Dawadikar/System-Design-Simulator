@@ -51,7 +51,10 @@ export default memo(function AppServerNode({ id, selected }: NodeProps) {
   const label = config?.label ?? 'App Server';
   const instances = config?.instances ?? 1;
   const rpsPerInstance = config?.rpsPerInstance ?? 500;
-  const totalCapacity = instances * rpsPerInstance;
+  const appDetail = running && metrics?.detail?.kind === 'app_server' ? metrics.detail : null;
+  const activeInstances = appDetail?.activeInstances ?? instances;
+  const pendingInstances = appDetail?.pendingInstances ?? 0;
+  const totalCapacity = activeInstances * rpsPerInstance;
 
   const status = running && metrics
     ? getStatusFromLoad(metrics.load, metrics.failed)
@@ -133,7 +136,7 @@ export default memo(function AppServerNode({ id, selected }: NodeProps) {
       {/* Config summary */}
       <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
         <span style={{ color: 'var(--text-dim)' }}>
-          {instances}× inst · {fmtRps(totalCapacity)} cap
+          {pendingInstances > 0 ? `${activeInstances}+${pendingInstances}` : activeInstances}× inst · {fmtRps(totalCapacity)} cap
         </span>
       </div>
 
