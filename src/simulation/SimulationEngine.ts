@@ -55,6 +55,7 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   worker_pool: 0,        // overridden by taskDurationMs config
   comment: 0,            // annotation only — no simulation effect
   traffic_generator: 0,  // pure source — no latency on the generator itself
+  rate_limiter: 1,       // minimal overhead per request
 };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +256,10 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
     case 'traffic_generator':
       // Annotation / pure-source nodes — never get overloaded
       return Number.MAX_SAFE_INTEGER;
+
+    case 'rate_limiter':
+      // Pre-switch load is overridden in the tick case; return rpsLimit as placeholder
+      return config.requestsPerSecond ?? 1000;
 
     case 'worker_pool': {
       // Throughput = workerCount × threadCount × (1000 / taskDurationMs)
@@ -847,6 +852,66 @@ export function runSimulationTick(
         const taskBacklogMs     = effectiveCap > 0 ? (queueDepth / effectiveCap) * 1000 : 0;
         if (queueDepth > 0) latencyMs += Math.min(5000, taskBacklogMs * 0.1);
         detail = { kind: 'worker_pool', queueDepth, workerUtilization, taskBacklogMs };
+        break;
+      }
+
+      case 'rate_limiter': {
+        const rpsLimit   = config.requestsPerSecond ?? 1000;
+        const burst      = config.burstCapacity     ?? 200;
+        const algo       = config.rateLimitAlgorithm ?? 'token_bucket';
+        const maxQueueSz = config.maxQueueSize       ?? 500;
+        const TICK_S     = 0.5; // seconds per simulation tick
+
+        // Instantaneous pass-through ceiling — determines when excess starts queuing.
+        // token/leaky bucket queue the excess; window algorithms reject immediately.
+        let instantCap: number;
+        switch (algo) {
+          case 'token_bucket':   instantCap = rpsLimit + burst;           break;
+          case 'leaky_bucket':   instantCap = rpsLimit;                   break;
+          case 'fixed_window':   instantCap = Math.round(rpsLimit * 1.5); break;
+          case 'sliding_window': instantCap = Math.round(rpsLimit * 1.2); break;
+          case 'sliding_log':    instantCap = rpsLimit;                   break;
+          default:               instantCap = rpsLimit;
+        }
+
+        const usesQueue = algo === 'token_bucket' || algo === 'leaky_bucket';
+        const excessRps = Math.max(0, rpsIn - instantCap);
+
+        // ---- Stateful queue (stored in requests, not RPS) ----
+        const prevQueueDepth = prevNodeMetrics?.detail?.kind === 'rate_limiter'
+          ? prevNodeMetrics.detail.queueDepth : 0;
+
+        // Queue drains at rpsLimit per second; only queuing algorithms use it
+        const drainRequests = usesQueue ? Math.min(prevQueueDepth, rpsLimit * TICK_S) : 0;
+        const inRequests    = usesQueue ? excessRps * TICK_S : 0;
+        const rawNewDepth   = prevQueueDepth + inRequests - drainRequests;
+        const queueOverflow = Math.max(0, rawNewDepth - maxQueueSz);
+        const queueDepth    = Math.max(0, rawNewDepth - queueOverflow);
+
+        // Drops = queue overflow (queuing algos) or all excess (window algos — immediate 429)
+        const droppedRps = usesQueue ? queueOverflow / TICK_S : excessRps;
+
+        // Output is always hard-capped at rpsLimit regardless of algorithm.
+        // instantCap only determines when queuing/dropping begins — not how much exits.
+        rpsOut = Math.min(rpsIn - droppedRps, rpsLimit);
+
+        const allowedRps   = rpsOut;
+        const throttledRps = Math.max(0, rpsIn - rpsOut);
+        const throttleRate = rpsIn > 0 ? throttledRps / rpsIn : 0;
+        // load = queue fill fraction for queuing algos; RPS-vs-limit for window algos
+        load   = usesQueue
+          ? (maxQueueSz > 0 ? queueDepth / maxQueueSz : 0)
+          : (instantCap > 0 ? Math.min(1, rpsIn / instantCap) : 0);
+        failed    = usesQueue ? queueDepth >= maxQueueSz * 0.99 : load > 1.05;
+        errorRate = throttleRate;
+
+        // Latency: Little's Law — queue depth (requests) / drain rate (req/s)
+        if (usesQueue && queueDepth > 0 && rpsLimit > 0) {
+          latencyMs += Math.min(2000, (queueDepth / rpsLimit) * 1000);
+        }
+        if (algo === 'sliding_log') latencyMs += 2; // bookkeeping overhead
+
+        detail = { kind: 'rate_limiter', allowedRps, throttledRps, throttleRate, queueDepth };
         break;
       }
 

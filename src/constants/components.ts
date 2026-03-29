@@ -1,4 +1,5 @@
-import type { ComponentType, NodeConfig, EdgeConfig } from '@/types';
+import type { ComponentType, NodeConfig, EdgeConfig, RateLimitAlgorithm } from '@/types';
+export type { RateLimitAlgorithm };
 
 export interface ComponentDefinition {
   type: ComponentType;
@@ -191,6 +192,20 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
       workerCount: 4,
       threadCount: 4,
       taskDurationMs: 500,
+    },
+  },
+  {
+    type: 'rate_limiter',
+    label: 'Rate Limiter',
+    icon: '⊘',
+    color: '#c026d3',
+    description: 'Throttles traffic by rate-limiting algorithm',
+    defaults: {
+      rateLimitAlgorithm: 'token_bucket',
+      requestsPerSecond: 1000,
+      burstCapacity: 200,
+      windowSizeMs: 1000,
+      maxQueueSize: 500,
     },
   },
 ];

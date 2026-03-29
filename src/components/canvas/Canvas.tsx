@@ -36,6 +36,7 @@ import CronJobNode from './nodes/CronJobNode';
 import WorkerPoolNode from './nodes/WorkerPoolNode';
 import CommentNode from './nodes/CommentNode';
 import TrafficGeneratorNode from './nodes/TrafficGeneratorNode';
+import RateLimiterNode from './nodes/RateLimiterNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -55,6 +56,7 @@ export const nodeTypes: NodeTypes = {
   worker_pool: WorkerPoolNode,
   comment: CommentNode,
   traffic_generator: TrafficGeneratorNode,
+  rate_limiter: RateLimiterNode,
 };
 
 export const edgeTypes: EdgeTypes = {

@@ -17,6 +17,7 @@ import CronJobFields from './fields/CronJobFields';
 import WorkerPoolFields from './fields/WorkerPoolFields';
 import CommentFields from './fields/CommentFields';
 import TrafficGeneratorFields from './fields/TrafficGeneratorFields';
+import RateLimiterFields from './fields/RateLimiterFields';
 import EdgeInspector from './fields/EdgeInspector';
 
 function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
@@ -91,6 +92,8 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <CommentFields nodeId={nodeId} />;
     case 'traffic_generator':
       return <TrafficGeneratorFields nodeId={nodeId} />;
+    case 'rate_limiter':
+      return <RateLimiterFields nodeId={nodeId} />;
     default:
       return null;
   }

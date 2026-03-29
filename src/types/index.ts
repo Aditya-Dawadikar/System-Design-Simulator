@@ -12,7 +12,15 @@ export type ComponentType =
   | 'cron_job'
   | 'worker_pool'
   | 'comment'
-  | 'traffic_generator';
+  | 'traffic_generator'
+  | 'rate_limiter';
+
+export type RateLimitAlgorithm =
+  | 'token_bucket'
+  | 'leaky_bucket'
+  | 'fixed_window'
+  | 'sliding_window'
+  | 'sliding_log';
 
 export type TrafficPattern = 'steady' | 'ramp' | 'spike' | 'wave' | 'chaos';
 
@@ -53,7 +61,8 @@ export type ComponentDetail =
   | { kind: 'pubsub';         subscriberLagMs: number; consumerThroughput: number; unackedMessages: number }
   | { kind: 'cloud_function'; coldStarts: number; throttledInvocations: number; concurrencyUsed: number }
   | { kind: 'cron_job';       overlapCount: number; lastRunDurationMs: number }
-  | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number };
+  | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number }
+  | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -155,6 +164,12 @@ export interface NodeConfig {
   generatorPattern?: TrafficPattern;
   /** 0–100: percentage of traffic that is reads. Default 50. */
   readRatioPct?: number;
+  // Rate Limiter
+  rateLimitAlgorithm?: RateLimitAlgorithm;
+  requestsPerSecond?: number;   // allowed RPS (default 1000)
+  burstCapacity?: number;       // extra requests allowed in burst window (default 200)
+  windowSizeMs?: number;        // window size for window-based algorithms (default 1000)
+  maxQueueSize?: number;        // max requests held in queue before dropping (default 500)
 }
 
 export interface EdgeConfig {
