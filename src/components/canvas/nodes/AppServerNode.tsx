@@ -49,7 +49,7 @@ export default memo(function AppServerNode({ id, selected }: NodeProps) {
   const metrics = useSimulationStore((s) => s.nodeMetrics[id]);
 
   const label = config?.label ?? 'App Server';
-  const instances = config?.instances ?? 2;
+  const instances = config?.instances ?? 1;
   const rpsPerInstance = config?.rpsPerInstance ?? 500;
   const totalCapacity = instances * rpsPerInstance;
 

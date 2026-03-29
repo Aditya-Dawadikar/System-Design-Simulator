@@ -549,24 +549,38 @@ export function runSimulationTick(
         const warmPoolEnabled    = config.warmPoolEnabled    ?? false;
 
         // ---- Shared config ----
-        const cpuCores   = config.cpuCores       ?? 4;
-        const ramGb      = config.ramGb          ?? 8;
-        const nominalPerInstRps = config.rpsPerInstance ?? Math.min(cpuCores, ramGb * 0.5) * 300;
+        const cpuCores    = config.cpuCores    ?? 4;
+        const ramGb       = config.ramGb       ?? 8;
+        const workload    = config.workloadType ?? 'io_bound';
+
+        // Nominal RPS ceiling per instance (compute-bound, IO assumed instant).
+        // Each workload type implies a different bottleneck resource.
+        const nominalPerInstRps = config.rpsPerInstance ?? (
+          workload === 'cpu_bound'    ? cpuCores * 350 :
+          workload === 'memory_bound' ? Math.min(cpuCores * 300, ramGb * 100) :
+          /* io_bound */                cpuCores * 500
+        );
 
         // ---- Downstream data-store back-pressure (Little's Law) ----
-        // Threads blocked on slow DB / storage reduce effective per-instance RPS.
-        // effectivePerInstRps = nominal × (baseLatency / (baseLatency + ioWaitMs))
-        const ioWaitMs = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
-        const ioScale  = baseLatency > 0 ? baseLatency / (baseLatency + ioWaitMs) : 1;
+        // IO-bound workloads are fully degraded by slow stores; CPU-bound barely at all.
+        const ioWaitWeight = workload === 'cpu_bound' ? 0.1 : workload === 'memory_bound' ? 0.35 : 1.0;
+        const ioWaitMs  = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const ioScale   = baseLatency > 0 ? baseLatency / (baseLatency + ioWaitMs * ioWaitWeight) : 1;
         const perInstRps = nominalPerInstRps * ioScale;
+
+        // cpuPct / memPct helpers — reflects which resource is actually saturating
+        function computeResourcePcts(dynLoad: number): { cpuPct: number; memPct: number } {
+          if (workload === 'cpu_bound')    return { cpuPct: Math.min(100, dynLoad * 97), memPct: Math.min(100, dynLoad * 45 + 10) };
+          if (workload === 'memory_bound') return { cpuPct: Math.min(100, dynLoad * 60), memPct: Math.min(100, dynLoad * 97) };
+          /* io_bound */                   return { cpuPct: Math.min(100, dynLoad * 50), memPct: Math.min(100, dynLoad * 55) };
+        }
 
         if (!autoscalingEnabled) {
           // ── Static path: fixed instance count, no FSM ──────────────
           const staticInstances = config.instances ?? 2;
           const effectiveCap    = staticInstances * perInstRps;
           const dynamicLoad     = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
-          const cpuPct = Math.min(100, dynamicLoad * 90);
-          const memPct = Math.min(100, cpuPct * 0.7 + 15);
+          const { cpuPct, memPct } = computeResourcePcts(dynamicLoad);
 
           load      = dynamicLoad;
           failed    = dynamicLoad > 1.05;
@@ -614,8 +628,7 @@ export function runSimulationTick(
           //    cpuPct up even with more instances, correctly showing the DB bottleneck
           const effectiveCap = activeInstances * perInstRps;
           const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
-          const cpuPct = Math.min(100, dynamicLoad * 90);
-          const memPct = Math.min(100, cpuPct * 0.7 + 15);
+          const { cpuPct, memPct } = computeResourcePcts(dynamicLoad);
 
           // 4. Scaling decision
           let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
@@ -763,10 +776,12 @@ export function runSimulationTick(
         const baseExecMs     = config.avgExecutionMs ?? 200;
         const memMb          = config.functionMemoryMb ?? 256;
         const memFactor      = Math.sqrt(memMb / 256);
+        const fnWorkload     = config.workloadType ?? 'io_bound';
+        const fnIoWeight     = fnWorkload === 'cpu_bound' ? 0.1 : fnWorkload === 'memory_bound' ? 0.35 : 1.0;
 
-        // IO wait from downstream data stores inflates effective execution time
-        const ioWaitMs       = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
-        const effectiveExecMs = baseExecMs + ioWaitMs;
+        // IO wait inflates effective execution time; weight depends on workload type
+        const ioWaitMs        = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const effectiveExecMs = baseExecMs + ioWaitMs * fnIoWeight;
 
         // Recalculate capacity and load with IO-inflated exec time
         const effectiveCap = Math.round(maxConcurrency * (1000 / effectiveExecMs) * memFactor);
@@ -803,13 +818,15 @@ export function runSimulationTick(
       }
 
       case 'worker_pool': {
-        const workers        = config.workerCount   ?? 4;
-        const threads        = config.threadCount   ?? 4;
+        const workers        = config.workerCount    ?? 4;
+        const threads        = config.threadCount    ?? 4;
         const baseTaskMs     = config.taskDurationMs ?? 500;
+        const wpWorkload     = config.workloadType   ?? 'io_bound';
+        const wpIoWeight     = wpWorkload === 'cpu_bound' ? 0.1 : wpWorkload === 'memory_bound' ? 0.35 : 1.0;
 
-        // IO wait from downstream data stores inflates effective task duration
-        const ioWaitMs         = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
-        const effectiveTaskMs  = baseTaskMs + ioWaitMs;
+        // IO wait inflates effective task duration; weight depends on workload type
+        const ioWaitMs        = computeDownstreamIoWaitMs(node.id, adj, nodes, previousMetrics);
+        const effectiveTaskMs = baseTaskMs + ioWaitMs * wpIoWeight;
 
         // Recalculate capacity and load with IO-inflated task duration
         const effectiveCap = Math.round(workers * threads * (1000 / effectiveTaskMs));

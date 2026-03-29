@@ -135,6 +135,7 @@ ramGb?: number                         // default 8
 rpsPerInstance?: number                // default 500
 avgLatencyMs?: number                  // default 40
 
+workloadType?: 'cpu_bound' | 'io_bound' | 'memory_bound'  // default 'io_bound'
 // App Server — Autoscaling
 autoscalingEnabled?: boolean           // master toggle (default false)
 warmPoolEnabled?: boolean              // warm replica toggle (default false)
@@ -367,6 +368,11 @@ Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at
 
 ### App Server (static, `autoscalingEnabled = false`)
 `effectiveCap = instances × perInstRps × ioScale`. IO wait from downstream stores added to latency.
+
+`workloadType` changes three things:
+- **IO wait weight** applied before `ioScale`: `cpu_bound=0.1`, `memory_bound=0.35`, `io_bound=1.0`
+- **Nominal RPS default** (when `rpsPerInstance` not set): `cpu_bound=cpuCores×350`, `memory_bound=min(cpuCores×300, ramGb×100)`, `io_bound=cpuCores×500`
+- **`cpuPct`/`memPct` display**: `cpu_bound` saturates CPU fast; `memory_bound` saturates memory fast; `io_bound` both moderate (threads waiting)
 
 ### App Server (autoscaling FSM)
 See "App Server Autoscaling FSM" section below.

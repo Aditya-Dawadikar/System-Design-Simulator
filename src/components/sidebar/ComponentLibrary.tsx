@@ -43,7 +43,7 @@ const COMPONENT_CATEGORY: Record<ComponentDefinition['type'], ComponentCategory>
 export default function ComponentLibrary() {
   const [search, setSearch] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Record<ComponentCategory, boolean>>({
-    Compute: false,
+    Compute: true,
     Storage: false,
     Network: false,
     Scaling: false,

@@ -225,12 +225,35 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
       </div>
 
       <div style={fieldStyle}>
-        <label style={labelStyle}>RPS per Instance</label>
+        <label style={labelStyle}>Workload Type</label>
+        <select
+          value={config.workloadType ?? 'io_bound'}
+          onChange={(e) => updateNodeConfig(nodeId, { workloadType: e.target.value as 'cpu_bound' | 'io_bound' | 'memory_bound' })}
+          style={selectStyle}
+        >
+          <option value="io_bound">IO Bound — threads wait on stores</option>
+          <option value="cpu_bound">CPU Bound — compute heavy</option>
+          <option value="memory_bound">Memory Bound — RAM bandwidth limited</option>
+        </select>
+        <div style={{ marginTop: '5px', fontSize: '9px', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", lineHeight: '1.5' }}>
+          {(config.workloadType ?? 'io_bound') === 'io_bound'    && 'High peak RPS, degrades sharply when stores are slow'}
+          {(config.workloadType ?? 'io_bound') === 'cpu_bound'   && 'Compute ceiling; store latency has minimal effect'}
+          {(config.workloadType ?? 'io_bound') === 'memory_bound'&& 'RAM bandwidth ceiling; moderate store sensitivity'}
+        </div>
+      </div>
+
+      <div style={fieldStyle}>
+        <label style={labelStyle}>RPS per Instance (override)</label>
         <input
           type="number"
           min={1}
-          value={config.rpsPerInstance ?? 500}
-          onChange={(e) => updateNodeConfig(nodeId, { rpsPerInstance: Number(e.target.value) })}
+          placeholder={String(
+            (config.workloadType ?? 'io_bound') === 'cpu_bound'    ? (config.cpuCores ?? 4) * 350 :
+            (config.workloadType ?? 'io_bound') === 'memory_bound' ? Math.min((config.cpuCores ?? 4) * 300, (config.ramGb ?? 8) * 100) :
+            (config.cpuCores ?? 4) * 500
+          )}
+          value={config.rpsPerInstance ?? ''}
+          onChange={(e) => updateNodeConfig(nodeId, { rpsPerInstance: e.target.value === '' ? undefined : Number(e.target.value) })}
           style={inputStyle}
         />
       </div>

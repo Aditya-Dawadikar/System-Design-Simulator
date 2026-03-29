@@ -16,6 +16,8 @@ export type ComponentType =
 
 export type TrafficPattern = 'steady' | 'ramp' | 'spike' | 'wave' | 'chaos';
 
+export type WorkloadType = 'cpu_bound' | 'io_bound' | 'memory_bound';
+
 export type LoadBalancerAlgorithm =
   | 'round_robin'
   | 'least_conn'
@@ -97,6 +99,7 @@ export interface NodeConfig {
   ramGb?: number;
   rpsPerInstance?: number;
   avgLatencyMs?: number;
+  workloadType?: WorkloadType;
   // Autoscaling (app_server)
   autoscalingEnabled?: boolean;    // master toggle — default false
   warmPoolEnabled?: boolean;       // warm replica toggle — default false

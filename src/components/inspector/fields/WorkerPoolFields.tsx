@@ -1,6 +1,7 @@
 'use client';
 
 import { useArchitectureStore } from '@/store/architectureStore';
+import type { WorkloadType } from '@/types';
 
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
@@ -27,8 +28,40 @@ export default function WorkerPoolFields({ nodeId }: WorkerPoolFieldsProps) {
   const durationMs = config.taskDurationMs ?? 500;
   const capacity = Math.round(workers * threads * (1000 / durationMs));
 
+  const selectStyle: React.CSSProperties = {
+    background: 'var(--bg-base)',
+    border: '1px solid var(--border)',
+    color: 'var(--text)',
+    borderRadius: '4px',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    padding: '5px 8px',
+    width: '100%',
+    boxSizing: 'border-box',
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2338505f'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 8px center',
+    paddingRight: '24px',
+  };
+
   return (
     <div>
+      <div style={fieldStyle}>
+        <label style={labelStyle}>Workload Type</label>
+        <select
+          value={config.workloadType ?? 'io_bound'}
+          onChange={(e) => updateNodeConfig(nodeId, { workloadType: e.target.value as WorkloadType })}
+          style={selectStyle}
+        >
+          <option value="io_bound">IO Bound — waits on stores</option>
+          <option value="cpu_bound">CPU Bound — compute heavy</option>
+          <option value="memory_bound">Memory Bound — RAM limited</option>
+        </select>
+      </div>
+
       {/* Throughput summary */}
       <div
         style={{

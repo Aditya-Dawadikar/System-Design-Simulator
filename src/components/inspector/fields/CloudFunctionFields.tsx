@@ -52,6 +52,19 @@ export default function CloudFunctionFields({ nodeId }: CloudFunctionFieldsProps
   return (
     <div>
       <div style={fieldStyle}>
+        <label style={labelStyle}>Workload Type</label>
+        <select
+          value={config.workloadType ?? 'io_bound'}
+          onChange={(e) => updateNodeConfig(nodeId, { workloadType: e.target.value as 'cpu_bound' | 'io_bound' | 'memory_bound' })}
+          style={selectStyle}
+        >
+          <option value="io_bound">IO Bound — waits on stores</option>
+          <option value="cpu_bound">CPU Bound — compute heavy</option>
+          <option value="memory_bound">Memory Bound — RAM limited</option>
+        </select>
+      </div>
+
+      <div style={fieldStyle}>
         <label style={labelStyle}>Memory</label>
         <select
           value={memMb}

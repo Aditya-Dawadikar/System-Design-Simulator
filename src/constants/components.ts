@@ -41,7 +41,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     color: '#00ff88',
     description: 'Application compute layer',
     defaults: {
-      instances: 2,
+      instances: 1,
       cpuCores: 4,
       ramGb: 8,
       rpsPerInstance: 500,
