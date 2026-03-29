@@ -303,7 +303,7 @@ function computeErrorRate(load: number): number {
 }
 
 function computeDropRate(load: number): number {
-  return Math.max(0, (load - 1.0) * 0.8);
+  return Math.min(1, Math.max(0, (load - 1.0) * 0.8));
 }
 
 /**
