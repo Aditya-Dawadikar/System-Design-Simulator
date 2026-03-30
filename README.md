@@ -4,29 +4,27 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 
 ---
 
-![System Design Simulator Demo](./views/sys_design_sim.gif)
+![System Design Simulator Demo](demo.gif)
 
 ---
 
 ## Features
 
-- **Drag-and-drop canvas** — build architectures from 15 component types; connect them with configurable edges
-- **Live simulation** — 500 ms tick loop models traffic propagation, queueing, failures, and autoscaling across the full graph
-- **Per-node metrics** — RPS in/out, mean and P99 latency, load gauge, error rate, and component-specific detail metrics
-- **Autoscaling FSM** — app servers scale warm (instant) or cold (countdown), with configurable thresholds and cooldowns
-- **Stateful components** — pub/sub subscriber lag, worker pool queue depth, cloud function cold starts, and block storage IOPS queues all accumulate across ticks
-- **Traffic patterns** — steady, ramp, spike, wave, and chaos multipliers applied per-tick
-- **Read/write ratio propagation** — traffic generators seed a read ratio that flows downstream; databases compute separate read and write loads
-- **Downstream IO back-pressure** — slow databases and storage nodes inflate app server and worker pool latency via Little's Law
-- **Edge configuration** — protocol, timeout, retry, circuit breaker, and per-edge traffic split (%)
-- **Event log** — real-time stream of info, warn, error, and k8s-level events with component context
-- **Inspector panel** — click any node or edge to configure it; changes take effect on the next tick
-- **Collapsible sidebar** — component library with drag handles for all node types
-- **Draggable/resizable dashboard** — metrics panel floats over the canvas, resize vertically
+- **16 component types** — CDN, load balancers, app servers, caches, databases, object/block/network storage, pub/sub, cloud functions, cron jobs, worker pools, rate limiters, service mesh, and traffic generators
+- **Live simulation** — 500 ms tick loop propagates RPS through the graph, computing load, latency, error rates, and component-specific detail metrics for every node
+- **App server autoscaling** — full FSM with warm pool (instant scale), cold provisioning countdown, configurable scale-up/down thresholds and cooldowns, min/max instance clamping
+- **Traffic patterns** — steady, ramp, spike, wave, and chaos modes with per-node traffic generators
+- **Service mesh** — mTLS, per-hop proxy overhead, retry amplification, circuit breaking, and a weight-based routing table with automatic deduplication
+- **Rate limiter algorithms** — token bucket, leaky bucket, fixed window, sliding window, sliding log — each with distinct burst and queuing behavior
+- **Inspector panel** — per-component configuration with real-time field editing; per-edge protocol, timeout, retry, circuit breaker, and bandwidth settings
+- **Metrics dashboard** — global stats, per-node ArcGauge load indicators, RPS sparklines, P99 latency, error rate, and component detail rows
+- **Event log** — timestamped info / warn / error / k8s events with auto-scroll
+- **Drag-and-drop canvas** — React Flow canvas with zoom, pan, duplicate, and delete; architecture persisted to localStorage
+- **JSON import/export** — save and share architecture snapshots
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
@@ -39,7 +37,7 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 npm install
 ```
 
-### Run
+### Dev server
 
 ```bash
 npm run dev
@@ -51,65 +49,61 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## How to use
 
-1. **Drag** a component from the sidebar onto the canvas
-2. **Connect** components by dragging from one node's handle to another
-3. **Configure** any node or edge by clicking it — the inspector opens on the right
-4. **Start** the simulation with the Run button in the controls bar
-5. **Read metrics** in the dashboard panel: global RPS, E2E latency, error rate, and per-node cards with sparklines
-6. **Watch the event log** for scaling events, overload alerts, and component-specific warnings
+1. **Drag components** from the left sidebar onto the canvas.
+2. **Connect nodes** by dragging from an output handle to an input handle. Each connection becomes a configurable edge.
+3. **Configure nodes** by clicking a node to open the inspector on the right. Adjust capacity, latency, scaling behavior, and other parameters.
+4. **Configure edges** by clicking an edge wire. Set protocol, timeout, retry count, circuit breaker, bandwidth cap, and traffic split percentage.
+5. **Run the simulation** using the controls at the bottom. Choose a peak RPS and a traffic pattern, then click Run.
+6. **Read metrics** in the dashboard below the canvas — global stats update every 500 ms; per-node cards show load, RPS, latency, and component-specific details.
+7. **Watch the event log** for overload events, recovery, autoscaling actions, and queue warnings.
 
 ---
 
 ## Component reference
 
-| Icon | Name | Key config | What it simulates |
+| Icon | Name | Key Config | What it simulates |
 |------|------|-----------|-------------------|
-| ◎ | CDN Edge | POPs, cacheable %, bandwidth | Cache hit rate degrades under load; origin bypass RPS tracked |
-| ⇌ | Load Balancer | Algorithm, max connections | Distributes traffic; signals scale-out when load > 75% |
-| ◈ | App Server | Instances, CPU, RAM, autoscaling | Compute with optional warm/cold autoscaling FSM; IO wait back-pressure |
-| ⚡ | Redis Cache | Memory GB, TTL, eviction policy | Hit rate absorbs reads; eviction rate degrades hit rate under load |
-| ▣ | Database | Engine, shards, replicas, RPS/shard | Separate read/write loads; connection pool exhaustion; slow queries |
-| ◫ | Cloud Storage | Throughput Mbps, object size, storage class | Throttled requests; bandwidth utilization; class-dependent latency |
-| ▤ | Block Storage | Disk type, IOPS limit | Stateful IOPS queue depth; disk-type-dependent latency (NVMe/SSD/HDD) |
-| ⊜ | Network Storage | Protocol, throughput, connection limit | Bandwidth-limited; connection saturation adds latency (NFS/SMB/CephFS) |
-| ⊕ | Pub/Sub | Partitions, retention | Stateful subscriber lag accumulates when producers outpace consumers |
-| ƒ | Cloud Function | Memory MB, concurrency, exec time | Cold starts on concurrency ramp; throttling at max concurrency |
-| ◷ | Cron Job | Interval, tasks per run | Schedule-driven emitter; overlap count when runs exceed interval |
-| ⚙ | Worker Pool | Workers, threads, task duration | Stateful queue depth; IO-inflated task duration; backlog latency |
-| ↯ | Traffic Generator | RPS, pattern, read ratio % | Injects traffic with configurable pattern and read/write split |
-| ⊘ | Rate Limiter | Algorithm, RPS limit, burst capacity, queue size | Five algorithms (token bucket, leaky bucket, fixed/sliding window, sliding log); stateful queue for bucket algos; throttle rate as error rate |
-| // | Comment | Text body | Annotation only — no simulation effect |
+| ◎ | CDN Edge | POPs, cacheable %, bandwidth | Cache hit absorption; origin bypass on misses and writes; degraded hit rate under high load |
+| ⇌ | Load Balancer | Algorithm, max connections | Traffic distribution; connection tracking; scaling event signal above 75% load |
+| ◈ | App Server | Instances, CPU/RAM, workload type, autoscaling | Compute capacity; IO wait back-pressure from downstream stores; FSM autoscaling with warm pool |
+| ⚡ | Redis Cache | Memory GB, TTL, eviction policy | Read absorption by hit rate; eviction rate under memory pressure; cluster mode |
+| ▣ | Database | Engine, shards, replicas, RPS/shard | Separate read/write load paths; connection pool exhaustion; query queue depth; slow query rate |
+| ◫ | Cloud Storage | Throughput, storage class, object size | Bandwidth throttling; downstream event notifications; storage class latency tiers |
+| ▤ | Block Storage | Disk type, IOPS, IO size | IOPS cap with stateful queue depth; disk type latency (NVMe / SSD / HDD) |
+| ⊜ | Network Storage | Protocol, throughput, connection limit | Bandwidth-limited NFS/SMB/CephFS; connection saturation latency penalty |
+| ⊕ | Pub/Sub | Partitions, retention | Partition-limited throughput; stateful subscriber lag accumulation |
+| ƒ | Cloud Function | Memory, concurrency, exec time | Serverless cold starts; concurrency throttling; IO wait inflation |
+| ◷ | Cron Job | Interval, tasks/run | Fixed-rate task emission; overlap detection when run duration exceeds interval |
+| ⚙ | Worker Pool | Workers, threads, task duration | Parallel task processing; stateful queue backlog with up to 5 s added latency |
+| ↯ | Traffic Generator | RPS, pattern, read ratio | Injects traffic at configurable RPS with its own pattern; sets read/write ratio downstream |
+| ⊘ | Rate Limiter | Algorithm, RPS limit, burst, window | Five rate-limiting algorithms with distinct burst tolerance and queue/drop behavior |
+| ⬡ | Service Mesh | mTLS, proxy overhead, retries, routing table | Sidecar proxy latency; retry amplification; circuit breaking; weight-based traffic routing |
+| // | Comment | Body text | Canvas annotation — no simulation effect |
 
 ---
 
 ## Traffic patterns
 
-| Pattern | Behavior | Multiplier |
-|---------|----------|-----------|
-| Steady | Constant load | 1.0× |
-| Ramp | Gradually increases to 1.6× over 30 seconds, then holds | 1.0× → 1.6× |
-| Spike | 3.5× burst for 2.5 s every 15 s, drops to 0.35× between spikes | 3.5× / 0.35× |
-| Wave | Sinusoidal oscillation between 0× and 1× | 0–1× |
-| Chaos | Random multiplier each tick | 0.3×–1.7× |
+| Pattern | Behavior |
+|---------|----------|
+| Steady | Constant 1× baseline RPS |
+| Ramp | Linearly grows to 1.6× over 30 seconds, then holds |
+| Spike | 3.5× burst for 2.5 s every 15 s, drops to 0.35× between spikes |
+| Wave | Sinusoidal oscillation between 0.5× and 1× on a 10-second cycle |
+| Chaos | Random multiplier between 0.3× and 1.7× every 500 ms |
 
-Traffic generators have their own independent pattern setting.
+Traffic generators have their own independent pattern setting. The global pattern scales the overall peak RPS.
 
 ---
 
 ## Tech stack
 
 | Technology | Role |
-|-----------|------|
-| Next.js 16 (App Router) | Framework and server |
-| React 19 | UI |
-| React Flow 11 | Interactive canvas |
-| Zustand 5 | State management (two stores) |
-| Tailwind CSS v4 | Styling |
-| TypeScript 5 | Language |
-| Recharts 3 | Sparkline charts |
-
----
-
-For full architecture documentation, simulation engine internals, and extension guides, see [CLAUDE.md](./CLAUDE.md).
-
-For planned and in-progress work, see [TODO.md](./TODO.md).
+|------------|------|
+| Next.js 16 | Framework and SSR |
+| React 19 | UI rendering |
+| React Flow 11 | Interactive graph canvas |
+| Zustand 5 | State management (architecture + simulation stores) |
+| Recharts 3 | Sparklines and time-series charts |
+| TypeScript 5 | Type safety across engine and UI |
+| Tailwind CSS 4 | Styling with dark terminal theme |

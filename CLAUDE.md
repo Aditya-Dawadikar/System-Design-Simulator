@@ -107,6 +107,7 @@ Defined in `src/constants/components.ts`. The `ComponentType` union in `src/type
 | `worker_pool` | Worker Pool | ⚙ | `#facc15` | Parallel task processing pool |
 | `traffic_generator` | Traffic Generator | ↯ | `#f43f5e` | Injects traffic at configurable RPS |
 | `rate_limiter` | Rate Limiter | ⊘ | `#c026d3` | Throttles traffic by rate-limiting algorithm |
+| `service_mesh` | Service Mesh | ⬡ | `#22d3ee` | Sidecar proxy layer — mTLS, retries, routing, circuit breaking |
 | `comment` | Comment | // | `#f59e0b` | Annotation node — no simulation effect |
 
 ---
@@ -213,6 +214,20 @@ burstCapacity?: number                 // extra requests in burst window (defaul
 windowSizeMs?: number                  // window size for window-based algorithms (default 1000)
 maxQueueSize?: number                  // max requests held in queue before dropping (default 500)
 
+// Service Mesh
+mtlsEnabled?: boolean                  // default true
+observabilityLevel?: 'none' | 'basic' | 'full'   // default 'basic'
+proxyOverheadMs?: number               // sidecar latency per hop (default 2)
+meshRetryCount?: number                // automatic retries on failure (default 1)
+meshCircuitBreakerEnabled?: boolean    // default false
+meshCircuitBreakerThreshold?: number   // error% to open circuit (default 50)
+meshRoutes?: Array<{                   // routing table
+  id: string
+  sourceNodeId: string                 // upstream service node ID (used for UI; engine deduplicates by destNodeId)
+  destNodeId: string                   // downstream service node ID
+  weightPct: number                    // relative weight (normalized to 100% at tick time)
+}>
+
 // Comment
 commentBody?: string
 ```
@@ -272,6 +287,7 @@ interface NodeMetrics {
 | `cron_job` | `overlapCount`, `lastRunDurationMs` |
 | `worker_pool` | `queueDepth` (stateful), `workerUtilization`, `taskBacklogMs` |
 | `rate_limiter` | `allowedRps`, `throttledRps`, `throttleRate`, `queueDepth` (stateful for queuing algos) |
+| `service_mesh` | `activeConnections`, `mtlsHandshakeRate`, `circuitBroken`, `retryRate` |
 
 ---
 
@@ -292,8 +308,9 @@ export function runSimulationTick(
 
 1. `buildAdjacency` — downstream/upstream maps + cycle detection via DFS (WHITE/GRAY/BLACK coloring)
 2. `topoSort` — Kahn's BFS; returns nodes in processing order and source node set
-3. BFS traversal in topological order computing per-node metrics
-4. Edge metrics pass: `rps = sourceMetric.rpsOut`, `isBottleneck = load > 0.9`
+3. Resolve service mesh routing tables → `resolvedEdgeConfigs` (overrides `splitPct` on matched edges; deduplicates by max weight per `destNodeId`)
+4. BFS traversal in topological order computing per-node metrics
+5. Edge metrics pass: `rps = sourceMetric.rpsOut`, `isBottleneck = load > 0.9`
 
 ### RPS sourcing rules
 
@@ -347,6 +364,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Worker Pool | `workerCount × threadCount × (1000/taskDurationMs)` |
 | Traffic Generator | `∞` (pure source) |
 | Rate Limiter | `requestsPerSecond` (placeholder; load overridden in tick) |
+| Service Mesh | `∞` (pass-through; load derived from proxy overhead fraction) |
 
 ### Base latencies (ms)
 
@@ -365,7 +383,8 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Worker Pool | 0 | `taskDurationMs` |
 | Cron Job | 0 | — |
 | Traffic Generator | 0 | — |
-| Rate Limiter | 1 | — (minimal bookkeeping overhead) |
+| Rate Limiter | 1 | — |
+| Service Mesh | 2 | `proxyOverheadMs` |
 
 ---
 
@@ -427,6 +446,9 @@ Five algorithms with different burst/queue behaviors:
 | `sliding_log` | `rpsLimit` | No — excess immediately dropped; +2 ms bookkeeping |
 
 `rpsOut` is always hard-capped at `requestsPerSecond` regardless of algorithm. **Stateful** queue for `token_bucket` and `leaky_bucket`. `load` = queue fill fraction (queuing algos) or `rpsIn / instantCap` (window algos). `errorRate = throttleRate`.
+
+### Service Mesh
+Pass-through proxy layer. Latency = `proxyOverheadMs × 2` (two sidecar hops) + observability overhead (`none=0`, `basic=0.5`, `full=1` ms) + mTLS overhead (~1 ms if enabled). Retries amplify downstream RPS when upstream errors occur (`retryRps += errorRps × meshRetryCount`). Circuit breaker: when error rate exceeds `meshCircuitBreakerThreshold%`, `circuitBroken = true` — traffic is fast-failed. Routing table overrides edge `splitPct` for matched `destNodeId` entries; duplicate dest pairs are resolved by max weight.
 
 ---
 
@@ -517,8 +539,9 @@ Defined identically in `SimulationEngine.ts` and `simulationStore.ts` (kept in s
 - **Default exports only** — all components use default exports. Named exports for components break the project convention.
 - **CSS import order** — Google Fonts `@import` in `globals.css` must precede `@tailwindcss/postcss`. Reversing breaks font loading.
 - **React Flow node registration** — every new `ComponentType` must be added to the `nodeTypes` object in `Canvas.tsx`. Missing registration causes React Flow to render a generic fallback node.
-- **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`, `rate_limiter`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
+- **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`, `rate_limiter`, `service_mesh`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
 - **Traffic pattern sync** — `getTrafficMultiplier` is duplicated in both `SimulationEngine.ts` and `simulationStore.ts`. Changing one requires updating the other.
 - **`p99LatencyMs = latencyMs × 2.5`** — fixed multiplier, computed at end of each node's tick.
 - **Autoscaling scale trigger uses `loadPct`, not `cpuPct`** — `scaleUpCpuPct`/`scaleDownCpuPct` config fields are compared against `dynamicLoad × 100`, not the displayed `cpuPct`. This is intentional so IO-bound workloads scale correctly.
 - **`computeCapacity` vs tick capacity** — `computeCapacity` for `app_server` uses `min(cpuCores, ramGb×0.5) × 300` and ignores `rpsPerInstance`. The tick case uses `rpsPerInstance` if set. These can diverge; the tick value is what actually determines simulation behavior.
+- **Service mesh routing deduplication** — `meshRoutes` supports `sourceNodeId` for UI display and dedup logic in the inspector. The simulation engine deduplicates by `destNodeId` only (max weight wins), ignoring `sourceNodeId`. The inspector UI marks lower-weight duplicate rules as "SHADOWED".
