@@ -58,14 +58,20 @@ export interface ScenarioEntry {
 
 function buildPaymentProcessing(): ArchitectureTemplate {
   const nodes: Node[] = [
-    makeNode('pay-tgen',   'traffic_generator', 60,  280),
-    makeNode('pay-rl',     'rate_limiter',      300, 280),
-    makeNode('pay-lb',     'load_balancer',     540, 280),
-    makeNode('pay-api',    'app_server',        780, 280),
+    makeNode('pay-tgen',   'traffic_generator', 60,   280),
+    makeNode('pay-rl',     'rate_limiter',      300,  280),
+    makeNode('pay-lb',     'load_balancer',     540,  280),
+    makeNode('pay-api',    'app_server',        780,  280),
     makeNode('pay-fraud',  'app_server',        1020, 120),
     makeNode('pay-txdb',   'database',          1020, 440),
     makeNode('pay-ps',     'pubsub',            1260, 280),
     makeNode('pay-notif',  'worker_pool',       1500, 280),
+    // ── Comment annotations ──────────────────────────────────────────────────
+    makeNode('pay-c1', 'comment', 170,  70),
+    makeNode('pay-c2', 'comment', 650,  70),
+    makeNode('pay-c3', 'comment', 880,  -80),
+    makeNode('pay-c4', 'comment', 870,  580),
+    makeNode('pay-c5', 'comment', 1140, 70),
   ];
 
   const edges: Edge[] = [
@@ -76,6 +82,12 @@ function buildPaymentProcessing(): ArchitectureTemplate {
     makeEdge('pay-api',   'pay-txdb'),
     makeEdge('pay-api',   'pay-ps'),
     makeEdge('pay-ps',    'pay-notif'),
+    // Annotation edges
+    makeEdge('pay-c1',    'pay-rl'),
+    makeEdge('pay-c2',    'pay-api'),
+    makeEdge('pay-c3',    'pay-fraud'),
+    makeEdge('pay-c4',    'pay-txdb'),
+    makeEdge('pay-c5',    'pay-ps'),
   ];
 
   return {
@@ -139,6 +151,52 @@ function buildPaymentProcessing(): ArchitectureTemplate {
         threadCount:    4,
         taskDurationMs: 200,
       }),
+      // ── Comment annotations ───────────────────────────────────────────────
+      'pay-c1': makeConfig('comment', {
+        label: 'Token Bucket Rate Limiter',
+        commentBody:
+`Req: Prevent card-testing attacks; protect the fraud engine from overload (NFR: sustain 1 500 RPS, burst to 5 000 for ≤ 30 s)
+
+Algo: Token bucket — tokens refill at requestsPerSecond/s. Burst capacity holds up to 400 extra requests; once the bucket empties, excess enters a queue (up to maxQueueSize) then gets dropped.
+
+Scale: Raise requestsPerSecond + burstCapacity as fraud engine capacity grows. For multi-region, back the bucket with a Redis INCRBY + EXPIRE so all API instances share one counter.`,
+      }),
+      'pay-c2': makeConfig('comment', {
+        label: 'Payment API (CPU-bound)',
+        commentBody:
+`Req: Accept + synchronously authorise transactions before writing to the ledger (FR: idempotent retries, definitive accept/decline in-request)
+
+Algo: Stateless REST handlers — each instance calls fraud engine synchronously, writes to DB with an idempotency key (unique index), then publishes to Pub/Sub. No local state = safe horizontal scale.
+
+Scale: Add instances (currently 3). Autoscaling recommended; CPU is the bottleneck, not memory. Keep instances stateless to avoid sticky-session requirements.`,
+      }),
+      'pay-c3': makeConfig('comment', {
+        label: 'Fraud Detection Engine',
+        commentBody:
+`Req: Score every transaction synchronously before authorisation (FR: fraud scoring on critical path; NFR: decision in < 200 ms)
+
+Algo: CPU-bound ML inference — gradient-boosted trees (XGBoost) or a small neural net. Single-pass feature extraction: velocity checks, BIN lookup, geo-anomaly. Deliberately single instance here to show saturation.
+
+Scale: Shard by card BIN or merchant ID behind a consistent-hash LB. Or move to a model-serving cluster (TorchServe / Triton) with GPU inference to cut avgLatencyMs from 120 → 15 ms.`,
+      }),
+      'pay-c4': makeConfig('comment', {
+        label: 'Transaction Ledger (PostgreSQL)',
+        commentBody:
+`Req: Persist each authorised transaction durably with idempotency (FR: no double-charges; NFR: full audit log for 7 years)
+
+Algo: Append-only writes with a unique idempotency_key index — duplicate inserts get a conflict error, not a double-write. PostgreSQL WAL provides crash-safe durability. No read replicas: reads must see their own writes (read-your-writes consistency).
+
+Scale: Add shards keyed by card-hash (currently 2). Use logical replication to a read replica for reporting — never route reporting queries to the primary.`,
+      }),
+      'pay-c5': makeConfig('comment', {
+        label: 'Settlement Event Bus',
+        commentBody:
+`Req: Decouple settlement, reconciliation, and notification consumers from the payment critical path (FR: at-least-once delivery; 72 h retention for replay)
+
+Algo: Partitioned append-only log (Kafka-style). Each partition is an ordered, durable sequence. Consumer groups allow independent read offsets — notification workers and reconciliation workers advance independently.
+
+Scale: Add partitions (currently 8) to increase consumer parallelism. Each partition maps to exactly one worker thread. Retention at 72 h lets consumers replay on restart without data loss.`,
+      }),
     },
     edgeConfigs: buildEdgeConfigs(edges),
   };
@@ -158,14 +216,19 @@ function buildPaymentProcessing(): ArchitectureTemplate {
 
 function buildHighFrequencyTrading(): ArchitectureTemplate {
   const nodes: Node[] = [
-    makeNode('hft-tgen',    'traffic_generator', 60,  300),
-    makeNode('hft-lb',      'load_balancer',     300, 300),
-    makeNode('hft-match',   'app_server',        540, 300),
-    makeNode('hft-book',    'block_storage',     780, 140),
-    makeNode('hft-tradedb', 'database',          780, 460),
-    makeNode('hft-ps',      'pubsub',            780, 300),
+    makeNode('hft-tgen',    'traffic_generator', 60,   300),
+    makeNode('hft-lb',      'load_balancer',     300,  300),
+    makeNode('hft-match',   'app_server',        540,  300),
+    makeNode('hft-book',    'block_storage',     780,  140),
+    makeNode('hft-tradedb', 'database',          780,  460),
+    makeNode('hft-ps',      'pubsub',            780,  300),
     makeNode('hft-risk',    'app_server',        1040, 160),
     makeNode('hft-mdfeed',  'app_server',        1040, 440),
+    // ── Comment annotations ──────────────────────────────────────────────────
+    makeNode('hft-c1', 'comment', 380,  90),
+    makeNode('hft-c2', 'comment', 540,  -80),
+    makeNode('hft-c3', 'comment', 540,  600),
+    makeNode('hft-c4', 'comment', 880,  90),
   ];
 
   const edges: Edge[] = [
@@ -176,6 +239,11 @@ function buildHighFrequencyTrading(): ArchitectureTemplate {
     makeEdge('hft-match',  'hft-ps'),
     makeEdge('hft-ps',     'hft-risk'),
     makeEdge('hft-ps',     'hft-mdfeed'),
+    // Annotation edges
+    makeEdge('hft-c1',     'hft-match'),
+    makeEdge('hft-c2',     'hft-book'),
+    makeEdge('hft-c3',     'hft-tradedb'),
+    makeEdge('hft-c4',     'hft-ps'),
   ];
 
   return {
@@ -242,6 +310,43 @@ function buildHighFrequencyTrading(): ArchitectureTemplate {
         workloadType:   'io_bound',
         avgLatencyMs:   5,
       }),
+      // ── Comment annotations ───────────────────────────────────────────────
+      'hft-c1': makeConfig('comment', {
+        label: 'Order Matching Engine',
+        commentBody:
+`Req: Match buy/sell orders by price-time priority (FR: FIFO within price level; NFR: p99 round-trip ≤ 1 ms)
+
+Algo: In-memory price-level B-tree (bid side desc, ask side asc). Incoming order walks the opposite side until filled or resting. Lock-free ring buffer for order intake (LMAX Disruptor pattern) — avoids mutex contention on the hot path.
+
+Scale: Partition by instrument symbol. Each engine instance owns a disjoint symbol set — zero cross-instance coordination. Add instances = add symbol capacity, not throughput for the same symbol.`,
+      }),
+      'hft-c2': makeConfig('comment', {
+        label: 'NVMe Order Book (mmap)',
+        commentBody:
+`Req: Persist order book state for crash recovery without adding latency (NFR: persistence must not inflate matching latency)
+
+Algo: Memory-mapped file (mmap) on NVMe — the OS page cache buffers writes. The engine reads/writes in-process (pointer deref, not syscall). fsync on checkpoint provides crash-safe recovery point.
+
+Scale: IOPS cap (100 k) is the ceiling. Upgrade to Intel Optane PMem for sub-µs persistence. Partition the book by symbol across multiple NVMe devices to spread IOPS.`,
+      }),
+      'hft-c3': makeConfig('comment', {
+        label: 'Trade Ledger (Sharded PG)',
+        commentBody:
+`Req: Durable, queryable record of every confirmed trade (FR: zero trade loss; regulatory audit trail)
+
+Algo: Append-only writes sharded by instrument hash (4 shards). Async replication to one read replica; risk and analytics queries route to replicas, leaving the primary for write throughput.
+
+Scale: Add shards. Use hash-range partitioning to keep hot instruments spread across shards. Read replicas can be promoted to primary for instant failover (< 1 min RTO with streaming replication).`,
+      }),
+      'hft-c4': makeConfig('comment', {
+        label: 'Market Data Bus + Consumers',
+        commentBody:
+`Req: Broadcast trade + order book delta events to all subscribers with ≤ 5 ms fan-out latency (FR: real-time market data; Risk Engine decisions async off critical path)
+
+Algo: Partitioned log (16 partitions, 2 h retention). Risk Engine and Market Data Feed each hold independent consumer group offsets — one slow consumer cannot block the other.
+
+Scale: Add partitions for more parallel consumers. Risk Engine is CPU-bound (VaR / Greeks calculation) — scale horizontally; each instance picks up a partition subset. Market Data Feed is IO-bound (WebSocket fan-out) — add instances to handle more concurrent subscribers.`,
+      }),
     },
     edgeConfigs: buildEdgeConfigs(edges),
   };
@@ -260,14 +365,20 @@ function buildHighFrequencyTrading(): ArchitectureTemplate {
 
 function buildAvProcessingPipeline(): ArchitectureTemplate {
   const nodes: Node[] = [
-    makeNode('av-tgen',    'traffic_generator', 60,  260),
-    makeNode('av-lb',      'load_balancer',     300, 260),
-    makeNode('av-upload',  'app_server',        540, 260),
-    makeNode('av-raw',     'cloud_storage',     780, 260),
+    makeNode('av-tgen',    'traffic_generator', 60,   260),
+    makeNode('av-lb',      'load_balancer',     300,  260),
+    makeNode('av-upload',  'app_server',        540,  260),
+    makeNode('av-raw',     'cloud_storage',     780,  260),
     makeNode('av-ps',      'pubsub',            1020, 260),
     makeNode('av-xcode',   'worker_pool',       1260, 260),
     makeNode('av-output',  'block_storage',     1500, 120),
     makeNode('av-cdn',     'cdn',               1500, 400),
+    // ── Comment annotations (alternating above/below to avoid overlap) ───────
+    makeNode('av-c1', 'comment', 400,  70),
+    makeNode('av-c2', 'comment', 640,  400),
+    makeNode('av-c3', 'comment', 880,  70),
+    makeNode('av-c4', 'comment', 1120, 400),
+    makeNode('av-c5', 'comment', 1350, 70),
   ];
 
   const edges: Edge[] = [
@@ -278,6 +389,12 @@ function buildAvProcessingPipeline(): ArchitectureTemplate {
     makeEdge('av-ps',     'av-xcode'),
     makeEdge('av-xcode',  'av-output'),
     makeEdge('av-xcode',  'av-cdn'),
+    // Annotation edges
+    makeEdge('av-c1',     'av-upload'),
+    makeEdge('av-c2',     'av-raw'),
+    makeEdge('av-c3',     'av-ps'),
+    makeEdge('av-c4',     'av-xcode'),
+    makeEdge('av-c5',     'av-cdn'),
   ];
 
   return {
@@ -336,6 +453,52 @@ function buildAvProcessingPipeline(): ArchitectureTemplate {
         cacheablePct:  95,
         bandwidthGbps: 400,
       }),
+      // ── Comment annotations ───────────────────────────────────────────────
+      'av-c1': makeConfig('comment', {
+        label: 'Upload Service (IO-bound)',
+        commentBody:
+`Req: Accept large media files; acknowledge only after the storage write is confirmed (FR: resumable uploads; no upload loss)
+
+Algo: Chunked multipart upload (TUS protocol or S3 multipart). Each chunk is written to object storage before ACK. Client tracks last confirmed chunk offset — failed uploads resume from checkpoint, not from zero.
+
+Scale: Add instances; uploads are IO-bound (network + storage), not CPU-bound. A single instance can handle many concurrent streams on an async I/O event loop.`,
+      }),
+      'av-c2': makeConfig('comment', {
+        label: 'Raw Media Object Store',
+        commentBody:
+`Req: Durably store raw uploads before any processing begins (NFR: 11-nines durability; strongly consistent PUT)
+
+Algo: Content-addressed storage — key is derived from upload metadata. Object storage backend uses erasure coding across availability zones. PUT is synchronous; GET after PUT is guaranteed consistent.
+
+Scale: Throughput = storageThroughputMbps ÷ objectSizeKb × 1 000. Large files saturate throughput fast — use multipart uploads to bypass the single-object bandwidth cap and parallelize chunk writes.`,
+      }),
+      'av-c3': makeConfig('comment', {
+        label: 'Encode Job Queue (Pub/Sub)',
+        commentBody:
+`Req: Decouple upload acknowledgement from transcoding start; buffer jobs during worker outages (FR: at-least-once delivery; retry up to 3× on failure)
+
+Algo: Partitioned append-only log. Consumer commits offset only after a successful transcode write — failed jobs stay uncommitted and are redelivered. Dead-letter queue receives jobs that exceed 3 retries.
+
+Scale: Increase partitions (currently 12) to raise max parallelism. Match partition count to total worker thread count for even load distribution.`,
+      }),
+      'av-c4': makeConfig('comment', {
+        label: 'Transcoder Worker Pool',
+        commentBody:
+`Req: Convert raw media into multiple resolution variants (FR: 4K, 1080p, 720p, 360p, audio-only outputs)
+
+Algo: FFmpeg pipeline — decode → scale filter graph → encode. H.265 (HEVC) for 4K, H.264 for lower resolutions; AAC for audio. Each worker thread processes one job at a time (CPU-bound, 3 s/job at 1080p on this config).
+
+Scale: Add workerCount + threadCount; transcoding is embarrassingly parallel across jobs. Enable GPU acceleration (NVENC on NVIDIA, VAAPI on Intel) to cut job time from 3 s → 0.3 s per 1080p minute.`,
+      }),
+      'av-c5': makeConfig('comment', {
+        label: 'NVMe Output + CDN Delivery',
+        commentBody:
+`Req: Serve encoded output globally with low latency; 95% of playback requests must be cache hits (NFR: CDN availability ≥ 99.9%)
+
+Algo: CDN uses origin-pull caching. On cache miss, the edge POP fetches the file from NVMe block storage (origin). Cache-Control: max-age sets TTL. Subsequent requests from the same region are served from edge memory.
+
+Scale: Add POPs for lower global latency. Increase bandwidthGbps for larger origin-pull bursts during cache cold-start after a new release.`,
+      }),
     },
     edgeConfigs: buildEdgeConfigs(edges),
   };
@@ -353,13 +516,18 @@ function buildAvProcessingPipeline(): ArchitectureTemplate {
 
 function buildRealTimeChat(): ArchitectureTemplate {
   const nodes: Node[] = [
-    makeNode('chat-tgen',    'traffic_generator', 60,  280),
-    makeNode('chat-lb',      'load_balancer',     300, 280),
-    makeNode('chat-gw',      'app_server',        540, 280),
-    makeNode('chat-cache',   'cache',             780, 120),
-    makeNode('chat-ps',      'pubsub',            780, 280),
-    makeNode('chat-db',      'database',          780, 440),
+    makeNode('chat-tgen',    'traffic_generator', 60,   280),
+    makeNode('chat-lb',      'load_balancer',     300,  280),
+    makeNode('chat-gw',      'app_server',        540,  280),
+    makeNode('chat-cache',   'cache',             780,  120),
+    makeNode('chat-ps',      'pubsub',            780,  280),
+    makeNode('chat-db',      'database',          780,  440),
     makeNode('chat-deliver', 'worker_pool',       1040, 280),
+    // ── Comment annotations ──────────────────────────────────────────────────
+    makeNode('chat-c1', 'comment', 400,  80),
+    makeNode('chat-c2', 'comment', 630,  -70),
+    makeNode('chat-c3', 'comment', 630,  580),
+    makeNode('chat-c4', 'comment', 890,  80),
   ];
 
   const edges: Edge[] = [
@@ -369,6 +537,11 @@ function buildRealTimeChat(): ArchitectureTemplate {
     makeEdge('chat-gw',      'chat-ps'),
     makeEdge('chat-gw',      'chat-db'),
     makeEdge('chat-ps',      'chat-deliver'),
+    // Annotation edges
+    makeEdge('chat-c1',      'chat-gw'),
+    makeEdge('chat-c2',      'chat-cache'),
+    makeEdge('chat-c3',      'chat-db'),
+    makeEdge('chat-c4',      'chat-deliver'),
   ];
 
   return {
@@ -427,6 +600,43 @@ function buildRealTimeChat(): ArchitectureTemplate {
         threadCount:    4,
         taskDurationMs: 80,
       }),
+      // ── Comment annotations ───────────────────────────────────────────────
+      'chat-c1': makeConfig('comment', {
+        label: 'WebSocket Gateway (autoscaling)',
+        commentBody:
+`Req: Maintain persistent bidirectional connections; deliver messages in ≤ 100 ms p99 (NFR: ≥ 1 M concurrent connections across fleet)
+
+Algo: Reactor pattern — single-threaded async event loop (epoll/kqueue). Each WebSocket connection is a file descriptor, not a thread. Non-blocking I/O means one thread can multiplex thousands of connections.
+
+Scale: Autoscales 3 → 16 instances (warm pool of 2 pre-provisioned). ip_hash LB keeps connections sticky — a session stays on its gateway instance for its full lifetime. New connections land on new instances after scale-out.`,
+      }),
+      'chat-c2': makeConfig('comment', {
+        label: 'Redis Session & Presence',
+        commentBody:
+`Req: Sub-millisecond presence lookup (online/typing) and session token validation (FR: presence staleness ≤ 5 s)
+
+Algo: Redis Hash for session fields (HGET/HSET, O(1)). EXPIRE sets TTL — clients must heartbeat every 5 min or be marked offline. GEORADIUS not needed here. Pub/Sub PUBLISH propagates presence events across gateway instances.
+
+Scale: Redis Cluster shards the keyspace by hash slot across 3–6 nodes. Increase memoryGb as user count grows. clusterMode is already enabled — add shards without downtime using CLUSTER REBALANCE.`,
+      }),
+      'chat-c3': makeConfig('comment', {
+        label: 'MongoDB Message History',
+        commentBody:
+`Req: Durable storage for paginated history retrieval and compliance (FR: zero message loss after sender ACK)
+
+Algo: Documents sharded by conversation_id (hash partitioning). Compound index on (conversation_id, timestamp) enables efficient range scans for pagination. Write concern = majority: a write is acknowledged only after replication to 2+ nodes.
+
+Scale: Add shards (currently 4). Read replicas (2 configured) serve history reads — route all GET /messages queries to secondaries and leave the primary for writes only.`,
+      }),
+      'chat-c4': makeConfig('comment', {
+        label: 'Delivery Worker Pool',
+        commentBody:
+`Req: Push each fanned-out message to recipient devices (mobile push, WebSocket) (FR: multi-device delivery; NFR: worker queue lag < 2 000 ms)
+
+Algo: Each worker dequeues a Pub/Sub message and routes to APNs (iOS), FCM (Android), or the gateway's WebSocket send queue. Stateless — any worker can handle any message. One delivery task ≈ 80 ms (network round-trip to push provider).
+
+Scale: Add workerCount (currently 12). Watch queue depth and subscriberLagMs in the metrics panel — these are the leading indicators of under-provisioned workers. Fan-out amplification: 1 sent message → N delivery tasks (one per recipient device).`,
+      }),
     },
     edgeConfigs: buildEdgeConfigs(edges),
   };
@@ -447,15 +657,21 @@ function buildRealTimeChat(): ArchitectureTemplate {
 
 function buildRideSharingPlatform(): ArchitectureTemplate {
   const nodes: Node[] = [
-    makeNode('rs-tgen',   'traffic_generator', 60,  280),
-    makeNode('rs-cdn',    'cdn',               300, 280),
-    makeNode('rs-lb',     'load_balancer',     540, 280),
-    makeNode('rs-loc',    'app_server',        780, 280),
+    makeNode('rs-tgen',   'traffic_generator', 60,   280),
+    makeNode('rs-cdn',    'cdn',               300,  280),
+    makeNode('rs-lb',     'load_balancer',     540,  280),
+    makeNode('rs-loc',    'app_server',        780,  280),
     makeNode('rs-cache',  'cache',             1020, 120),
     makeNode('rs-db',     'database',          1020, 440),
     makeNode('rs-ps',     'pubsub',            1260, 280),
     makeNode('rs-match',  'worker_pool',       1500, 160),
     makeNode('rs-notif',  'cloud_function',    1500, 400),
+    // ── Comment annotations ──────────────────────────────────────────────────
+    makeNode('rs-c1', 'comment', 160,  80),
+    makeNode('rs-c2', 'comment', 640,  80),
+    makeNode('rs-c3', 'comment', 880,  -70),
+    makeNode('rs-c4', 'comment', 1350, 80),
+    makeNode('rs-c5', 'comment', 1350, 530),
   ];
 
   const edges: Edge[] = [
@@ -467,6 +683,12 @@ function buildRideSharingPlatform(): ArchitectureTemplate {
     makeEdge('rs-loc',   'rs-ps'),
     makeEdge('rs-ps',    'rs-match'),
     makeEdge('rs-ps',    'rs-notif'),
+    // Annotation edges
+    makeEdge('rs-c1',    'rs-cdn'),
+    makeEdge('rs-c2',    'rs-loc'),
+    makeEdge('rs-c3',    'rs-cache'),
+    makeEdge('rs-c4',    'rs-match'),
+    makeEdge('rs-c5',    'rs-notif'),
   ];
 
   return {
@@ -536,6 +758,52 @@ function buildRideSharingPlatform(): ArchitectureTemplate {
         maxConcurrency:   300,
         functionMemoryMb: 256,
         avgExecutionMs:   80,
+      }),
+      // ── Comment annotations ───────────────────────────────────────────────
+      'rs-c1': makeConfig('comment', {
+        label: 'Map Tile CDN',
+        commentBody:
+`Req: Serve static map tiles globally without hitting origin; reduce Location Service load (NFR: CDN hit rate ≥ 80% for tile requests)
+
+Algo: Edge caching keyed by tile coordinates (z/x/y Slippy Map scheme). LRU eviction at the edge. Popular city tiles have very high temporal locality — the same tiles are requested repeatedly.
+
+Scale: Add POPs for lower global latency. Pre-warm caches after tile data refreshes (map updates). Increase cacheablePct as the tile set stabilises and fewer unique tiles are requested.`,
+      }),
+      'rs-c2': makeConfig('comment', {
+        label: 'Location Service (autoscaling)',
+        commentBody:
+`Req: Accept driver location updates every 5 s; serve nearest-driver queries for matching (FR: location staleness ≤ 15 s; NFR: 5 000 updates/sec)
+
+Algo: Write path: UPSERT driver position into Redis GEO (GEOADD, O(log N)) + async write to PostGIS for persistence. Read path: GEORADIUS in Redis for sub-ms nearest-driver lookup.
+
+Scale: Autoscales 2 → 12 instances at 65% CPU. Location updates are write-heavy (IO-bound) — each driver sends a ping every 5 s. At 100 k active drivers = 20 k writes/s. Monitor cache write throughput, not just CPU.`,
+      }),
+      'rs-c3': makeConfig('comment', {
+        label: 'Driver Location Cache (Redis GEO)',
+        commentBody:
+`Req: Sub-millisecond read of current driver positions for the matching algorithm (NFR: matching must complete in ≤ 30 s from request)
+
+Algo: Redis Sorted Set with geohash score (GEO commands). GEOADD stores lat/lng; GEORADIUS returns drivers within N km sorted by distance in O(N + log M). Short TTL (10 s) forces freshness — stale positions degrade match quality.
+
+Scale: Redis Cluster in clusterMode shards GEO keys by hash slot. Tuning: TTL=10 s is a deliberate trade-off — lower TTL = fresher data but higher DB write pressure. Monitor Redis write amplification as driver count grows.`,
+      }),
+      'rs-c4': makeConfig('comment', {
+        label: 'Geo-Matching Engine',
+        commentBody:
+`Req: Pair each ride request with the nearest available driver (FR: median time-to-match ≤ 30 s; NFR: 3× spike load must not degrade SLA)
+
+Algo: CPU-bound nearest-neighbour search over candidate drivers from Redis GEO. Applies filters: driver rating, vehicle type, surge zone. Runs an ETA model (road-graph Dijkstra or ML) to rank candidates. One task ≈ 150 ms.
+
+Scale: Add workerCount + threadCount. Watch queueDepth and taskBacklogMs — these lead time-to-match degradation. Matching is embarrassingly parallel across independent requests.`,
+      }),
+      'rs-c5': makeConfig('comment', {
+        label: 'Push Notifier (Serverless)',
+        commentBody:
+`Req: Deliver match confirmation to driver + rider within 10 s of match (FR: ≥ 99.9% notification delivery; NFR: handles burst at concert/event end)
+
+Algo: Stateless serverless function — one invocation per notification. Routes to APNs (iOS) or FCM (Android) based on device token. Single retry on timeout. Cold starts add ~200 ms on first invocation after idle period.
+
+Scale: Increase maxConcurrency (currently 300). Serverless scales automatically up to the concurrency limit. At surge peaks (end of large events), hundreds of matches fire simultaneously — provision higher concurrency or put an async queue in front to smooth the burst.`,
       }),
     },
     edgeConfigs: buildEdgeConfigs(edges),
