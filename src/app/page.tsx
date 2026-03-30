@@ -1,10 +1,12 @@
 'use client';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import { DEFAULT_TEMPLATE } from '@/templates/defaultTemplate';
 import { ARCHITECTURE_LIBRARY, type ArchitectureEntry } from '@/templates/architectures';
+import { SCENARIO_LIBRARY, type ScenarioEntry } from '@/templates/scenarios';
 
 const DIFFICULTY_COLOR: Record<string, string> = {
   beginner:     'var(--accent-green)',
@@ -36,6 +38,18 @@ export default function Dashboard() {
     loadTemplate(entry.template);
     router.push('/simulator');
   }
+
+  function openScenario(entry: ScenarioEntry) {
+    stop();
+    reset();
+    loadTemplate(entry.template);
+    router.push('/simulator');
+  }
+
+  const ARCH_PAGE_SIZE = 3;
+  const SCENARIO_PAGE_SIZE = 3;
+  const [archVisible, setArchVisible] = useState(ARCH_PAGE_SIZE);
+  const [scenarioVisible, setScenarioVisible] = useState(SCENARIO_PAGE_SIZE);
 
   return (
     <div style={{
@@ -139,7 +153,7 @@ export default function Dashboard() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 16,
           }}>
-            {ARCHITECTURE_LIBRARY.map((entry) => (
+            {ARCHITECTURE_LIBRARY.slice(0, archVisible).map((entry) => (
               <ArchitectureCard
                 key={entry.id}
                 entry={entry}
@@ -147,7 +161,93 @@ export default function Dashboard() {
               />
             ))}
           </div>
+          {archVisible < ARCHITECTURE_LIBRARY.length && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
+              <button
+                onClick={() => setArchVisible((v) => Math.min(v + ARCH_PAGE_SIZE, ARCHITECTURE_LIBRARY.length))}
+                style={{
+                  padding: '7px 24px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: 'var(--text-dim)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  letterSpacing: '0.05em',
+                  transition: 'border-color 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-purple)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-purple)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
+                }}
+              >
+                Load more ({ARCHITECTURE_LIBRARY.length - archVisible} remaining)
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Real-World Scenarios */}
+        <div style={{ marginTop: 56 }}>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: 2, marginBottom: 6 }}>
+              // REAL-WORLD SCENARIOS
+            </div>
+            <div style={{ width: 40, height: 2, background: 'var(--accent-orange)', borderRadius: 1 }} />
+            <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
+              Industry-specific architectures modelled after production systems. Each scenario is tuned to surface realistic failure modes.
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gap: 16,
+          }}>
+            {SCENARIO_LIBRARY.slice(0, scenarioVisible).map((entry) => (
+              <ScenarioCard
+                key={entry.id}
+                entry={entry}
+                onLoad={() => openScenario(entry)}
+              />
+            ))}
+          </div>
+          {scenarioVisible < SCENARIO_LIBRARY.length && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
+              <button
+                onClick={() => setScenarioVisible((v) => Math.min(v + SCENARIO_PAGE_SIZE, SCENARIO_LIBRARY.length))}
+                style={{
+                  padding: '7px 24px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: 'var(--text-dim)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  letterSpacing: '0.05em',
+                  transition: 'border-color 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-orange)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-orange)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
+                }}
+              >
+                Load more ({SCENARIO_LIBRARY.length - scenarioVisible} remaining)
+              </button>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
@@ -223,6 +323,15 @@ function PlaygroundCard({ title, subtitle, description, icon, accentColor, onCli
 
 interface ArchitectureCardProps {
   entry: ArchitectureEntry;
+  onLoad: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Scenario Card  (declared early so it's in scope below)
+// ---------------------------------------------------------------------------
+
+interface ScenarioCardProps {
+  entry: ScenarioEntry;
   onLoad: () => void;
 }
 
@@ -310,6 +419,109 @@ function ArchitectureCard({ entry, onLoad }: ArchitectureCardProps) {
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
             (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-green)';
+          }}
+        >
+          Load →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario Card
+// ---------------------------------------------------------------------------
+
+function ScenarioCard({ entry, onLoad }: ScenarioCardProps) {
+  const diffColor = DIFFICULTY_COLOR[entry.difficulty] ?? 'var(--text-dim)';
+  const nodeCount = entry.template.nodes.length;
+  const edgeCount = entry.template.edges.length;
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-panel)',
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        padding: '20px 22px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        transition: 'border-color 0.15s',
+        borderLeft: '3px solid var(--accent-orange)',
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent-orange)'; }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLDivElement;
+        el.style.borderColor = 'var(--border)';
+        el.style.borderLeftColor = 'var(--accent-orange)';
+      }}
+    >
+      {/* Top row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{entry.name}</div>
+        <span style={{
+          fontSize: 9,
+          fontWeight: 700,
+          color: diffColor,
+          border: `1px solid ${diffColor}44`,
+          borderRadius: 3,
+          padding: '1px 6px',
+          whiteSpace: 'nowrap',
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+        }}>
+          {entry.difficulty}
+        </span>
+      </div>
+
+      {/* Description */}
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.65 }}>{entry.description}</div>
+
+      {/* Tags */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {entry.tags.map((tag) => (
+          <span key={tag} style={{
+            fontSize: 9,
+            color: 'var(--accent-orange)',
+            background: 'var(--accent-orange)11',
+            border: '1px solid var(--accent-orange)33',
+            borderRadius: 3,
+            padding: '2px 7px',
+            letterSpacing: 0.5,
+          }}>
+            {tag}
+          </span>
+        ))}
+      </div>
+
+      {/* Footer */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+          {nodeCount} nodes · {edgeCount} edges
+        </span>
+        <button
+          onClick={onLoad}
+          style={{
+            padding: '5px 14px',
+            border: '1px solid var(--accent-orange)',
+            borderRadius: 4,
+            background: 'transparent',
+            color: 'var(--accent-orange)',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: 'pointer',
+            letterSpacing: '0.05em',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-orange)';
+            (e.currentTarget as HTMLButtonElement).style.color = 'var(--bg-base)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+            (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-orange)';
           }}
         >
           Load →
