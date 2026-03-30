@@ -35,6 +35,7 @@ const COMPONENT_CATEGORY: Record<ComponentDefinition['type'], ComponentCategory>
   cdn: 'Network',
   load_balancer: 'Network',
   rate_limiter: 'Network',
+  service_mesh: 'Network',
   traffic_generator: 'Scaling',
   pubsub: 'Async',
   cron_job: 'Async',

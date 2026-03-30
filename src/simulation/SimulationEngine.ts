@@ -56,6 +56,7 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   comment: 0,            // annotation only — no simulation effect
   traffic_generator: 0,  // pure source — no latency on the generator itself
   rate_limiter: 1,       // minimal overhead per request
+  service_mesh: 2,       // sidecar proxy overhead; overridden by proxyOverheadMs config
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,10 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       // Pre-switch load is overridden in the tick case; return rpsLimit as placeholder
       return config.requestsPerSecond ?? 1000;
 
+    case 'service_mesh':
+      // High-throughput transparent proxy; load rarely saturates
+      return 100000;
+
     case 'worker_pool': {
       // Throughput = workerCount × threadCount × (1000 / taskDurationMs)
       const workers = config.workerCount ?? 4;
@@ -292,6 +297,7 @@ function computeBaseLatency(type: ComponentType, config: NodeConfig): number {
     const protoLatency: Record<string, number> = { nfs: 5, smb: 8, cephfs: 3 };
     return protoLatency[config.nfsProtocol ?? 'nfs'] ?? 5;
   }
+  if (type === 'service_mesh') return config.proxyOverheadMs ?? 2;
   return BASE_LATENCY[type] ?? 10;
 }
 
@@ -422,6 +428,47 @@ export function runSimulationTick(
   // Propagated from traffic_generator config downstream through the graph.
   const readRatioOutMap = new Map<string, number>();
 
+  // ---- 4.5. Resolve service mesh routing tables into effective edge splitPct overrides ----
+  // For each service_mesh node with meshRoutes, match route destNodeId to downstream node IDs
+  // and override the edge's splitPct so the BFS distributes traffic accordingly.
+  // Deduplication: for duplicate (sourceNodeId, destNodeId) pairs only the highest weight wins.
+  const resolvedEdgeConfigs = { ...edgeConfigs };
+  for (const node of nodes) {
+    if (getNodeType(node) !== 'service_mesh') continue;
+    const meshCfg = nodeConfigs[node.id] ?? {};
+    const routes = meshCfg.meshRoutes;
+    if (!routes || routes.length === 0) continue;
+
+    // Deduplicate: keep max weight per dest
+    const destMaxWeight = new Map<string, number>();
+    for (const r of routes) {
+      if (!r.destNodeId) continue;
+      const cur = destMaxWeight.get(r.destNodeId) ?? -1;
+      if (r.weightPct > cur) destMaxWeight.set(r.destNodeId, r.weightPct);
+    }
+    if (destMaxWeight.size === 0) continue;
+
+    const totalWeight = Array.from(destMaxWeight.values()).reduce((s, w) => s + w, 0);
+    if (totalWeight === 0) continue;
+
+    const downstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+      (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+    );
+    for (const dsId of downstreamIds) {
+      const weight = destMaxWeight.get(dsId);
+      if (weight !== undefined) {
+        const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
+        if (eid) {
+          const normalizedPct = (weight / totalWeight) * 100;
+          resolvedEdgeConfigs[eid] = {
+            ...(edgeConfigs[eid] ?? { protocol: 'REST', timeoutMs: 5000, retryCount: 2, circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0 }),
+            splitPct: normalizedPct,
+          };
+        }
+      }
+    }
+  }
+
   // ---- 5. BFS traversal in topological order ----
   const nodeMetrics: Record<string, NodeMetrics> = {};
 
@@ -470,7 +517,7 @@ export function runSimulationTick(
       let totalReadRpsIn = 0;
       for (const uid of upstreamIds) {
         const upstreamOut = rpsOutMap.get(uid) ?? 0;
-        const share = computeEdgeShare(uid, node.id, upstreamOut, adj, edgeConfigs, cyclingEdgeIds);
+        const share = computeEdgeShare(uid, node.id, upstreamOut, adj, resolvedEdgeConfigs, cyclingEdgeIds);
         rpsIn += share;
         totalReadRpsIn += share * (readRatioOutMap.get(uid) ?? 0.5);
       }
@@ -916,6 +963,68 @@ export function runSimulationTick(
         if (algo === 'sliding_log') latencyMs += 2; // bookkeeping overhead
 
         detail = { kind: 'rate_limiter', allowedRps, throttledRps, throttleRate, queueDepth };
+        break;
+      }
+
+      case 'service_mesh': {
+        const mtls        = config.mtlsEnabled !== false; // default true
+        const cbEnabled   = config.meshCircuitBreakerEnabled ?? false;
+        const cbThreshold = (config.meshCircuitBreakerThreshold ?? 50) / 100;
+        const obsLevel    = config.observabilityLevel ?? 'basic';
+        const meshRetries = config.meshRetryCount ?? 1;
+
+        // Latency base = proxy overhead (baseLatency) + mTLS handshake + observability overhead
+        const mtlsOverhead = mtls ? 1 : 0;
+        const obsOverhead  = obsLevel === 'full' ? 1 : obsLevel === 'basic' ? 0.5 : 0;
+        latencyMs = baseLatency + mtlsOverhead + obsOverhead + Math.pow(Math.min(load, 2.0), 2) * 200;
+
+        // Use previous tick's error rate to avoid feedback amplification instability.
+        // The circuit breaker observes the previous error rate passing through the mesh.
+        const prevMeshErrorRate = prevNodeMetrics?.errorRate ?? 0;
+        const circuitBroken     = cbEnabled && prevMeshErrorRate >= cbThreshold;
+
+        if (circuitBroken) {
+          // Open circuit: fast-fail almost all traffic (5 % allowed for health checks)
+          rpsOut    = rpsIn * 0.05;
+          load      = 1.2;
+          failed    = true;
+          errorRate = 0.95;
+          latencyMs = baseLatency + 1; // fail-fast path — no queuing penalty
+        } else {
+          const dropRate = computeDropRate(load);
+          rpsOut    = rpsIn * (1 - dropRate);
+          errorRate = computeErrorRate(load);
+
+          if (meshRetries > 0) {
+            // ── Retry policy ───────────────────────────────────────────────────
+            // 1. Retries add latency: the caller waits while the mesh retries failing
+            //    requests. Average extra wait = P(retry) × retries × proxy round-trip.
+            //    Uses prevMeshErrorRate so the first retry tick is zero (stable).
+            const retryLatencyMs = prevMeshErrorRate * meshRetries * baseLatency;
+            latencyMs += retryLatencyMs;
+
+            // 2. Retries reduce effective caller-visible error rate.
+            //    P(all n+1 attempts fail) = errorRate^(n+1).
+            //    At low error rates this approaches zero quickly; at high rates it
+            //    still fails but with fewer 5xx returned to the caller.
+            errorRate = Math.pow(Math.min(errorRate, 0.99), meshRetries + 1);
+
+            // 3. Downstream sees amplified traffic: original rpsOut + retried portion.
+            //    Cap at 2× rpsIn to prevent runaway amplification.
+            //    Uses prevMeshErrorRate for stability (avoids same-tick feedback loop).
+            const retryAmplification = 1 + prevMeshErrorRate * meshRetries * 0.8;
+            rpsOut = Math.min(rpsIn * 2, rpsOut * retryAmplification);
+          }
+        }
+
+        // Active connections: each request holds a sidecar connection for ~proxyOverheadMs
+        const activeConnections = Math.round(rpsIn * (config.proxyOverheadMs ?? 2) / 1000);
+        // mTLS handshake rate: ~10 % of connections are new (TLS establishment)
+        const mtlsHandshakeRate = mtls ? Math.round(rpsIn * 0.1) : 0;
+        // Retry rate: fraction of in-flight requests being retried this tick
+        const retryRate = meshRetries > 0 ? Math.min(0.8, prevMeshErrorRate * meshRetries) : 0;
+
+        detail = { kind: 'service_mesh', activeConnections, mtlsHandshakeRate, circuitBroken, retryRate };
         break;
       }
 

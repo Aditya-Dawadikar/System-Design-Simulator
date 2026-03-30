@@ -13,7 +13,8 @@ export type ComponentType =
   | 'worker_pool'
   | 'comment'
   | 'traffic_generator'
-  | 'rate_limiter';
+  | 'rate_limiter'
+  | 'service_mesh';
 
 export type RateLimitAlgorithm =
   | 'token_bucket'
@@ -62,7 +63,8 @@ export type ComponentDetail =
   | { kind: 'cloud_function'; coldStarts: number; throttledInvocations: number; concurrencyUsed: number }
   | { kind: 'cron_job';       overlapCount: number; lastRunDurationMs: number }
   | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number }
-  | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number };
+  | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number }
+  | { kind: 'service_mesh'; activeConnections: number; mtlsHandshakeRate: number; circuitBroken: boolean; retryRate: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -170,6 +172,14 @@ export interface NodeConfig {
   burstCapacity?: number;       // extra requests allowed in burst window (default 200)
   windowSizeMs?: number;        // window size for window-based algorithms (default 1000)
   maxQueueSize?: number;        // max requests held in queue before dropping (default 500)
+  // Service Mesh
+  mtlsEnabled?: boolean;                               // mutual TLS between services (default true)
+  observabilityLevel?: 'none' | 'basic' | 'full';     // telemetry collection level (default 'basic')
+  proxyOverheadMs?: number;                            // sidecar proxy latency per hop (default 2)
+  meshRetryCount?: number;                             // automatic mesh-level retries (default 1)
+  meshCircuitBreakerEnabled?: boolean;                 // trip on high error rate (default false)
+  meshCircuitBreakerThreshold?: number;                // error % to trip breaker (default 50)
+  meshRoutes?: Array<{ id: string; sourceNodeId: string; destNodeId: string; weightPct: number }>;  // routing table
 }
 
 export interface EdgeConfig {

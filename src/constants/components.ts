@@ -208,6 +208,21 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
       maxQueueSize: 500,
     },
   },
+  {
+    type: 'service_mesh',
+    label: 'Service Mesh',
+    icon: '⊛',
+    color: '#22d3ee',
+    description: 'Sidecar proxy layer — mTLS, retries, circuit breaking',
+    defaults: {
+      mtlsEnabled: true,
+      observabilityLevel: 'basic',
+      proxyOverheadMs: 2,
+      meshRetryCount: 1,
+      meshCircuitBreakerEnabled: false,
+      meshCircuitBreakerThreshold: 50,
+    },
+  },
 ];
 
 export const COMPONENT_BY_TYPE: Record<ComponentType, ComponentDefinition> =

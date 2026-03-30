@@ -37,6 +37,7 @@ import WorkerPoolNode from './nodes/WorkerPoolNode';
 import CommentNode from './nodes/CommentNode';
 import TrafficGeneratorNode from './nodes/TrafficGeneratorNode';
 import RateLimiterNode from './nodes/RateLimiterNode';
+import ServiceMeshNode from './nodes/ServiceMeshNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -57,6 +58,7 @@ export const nodeTypes: NodeTypes = {
   comment: CommentNode,
   traffic_generator: TrafficGeneratorNode,
   rate_limiter: RateLimiterNode,
+  service_mesh: ServiceMeshNode,
 };
 
 export const edgeTypes: EdgeTypes = {
