@@ -12,6 +12,7 @@ interface ArchitectureStore {
   edgeConfigs: Record<string, EdgeConfig>;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  activeScenarioId: string | null;
 
   addNode: (type: ComponentType, position: XYPosition) => string;
   removeNode: (id: string) => void;
@@ -23,7 +24,7 @@ interface ArchitectureStore {
   updateEdgeConfig: (id: string, config: Partial<EdgeConfig>) => void;
   setSelectedNode: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
-  loadTemplate: (template: ArchitectureTemplate) => void;
+  loadTemplate: (template: ArchitectureTemplate, scenarioId?: string) => void;
   exportToJSON: () => string;
   importFromJSON: (json: string) => void;
 }
@@ -40,6 +41,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
       edgeConfigs: {},
       selectedNodeId: null,
       selectedEdgeId: null,
+      activeScenarioId: null,
 
       addNode: (type, position) => {
         const def = COMPONENT_BY_TYPE[type];
@@ -117,7 +119,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
       setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
       setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
 
-      loadTemplate: (template) => {
+      loadTemplate: (template, scenarioId = null) => {
         set({
           nodes: template.nodes,
           edges: template.edges,
@@ -125,6 +127,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
           edgeConfigs: template.edgeConfigs,
           selectedNodeId: null,
           selectedEdgeId: null,
+          activeScenarioId: scenarioId,
         });
       },
 

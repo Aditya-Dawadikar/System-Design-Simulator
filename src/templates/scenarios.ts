@@ -28,12 +28,20 @@ function buildEdgeConfigs(edges: Edge[]): Record<string, EdgeConfig> {
 // Metadata wrapper
 // ---------------------------------------------------------------------------
 
+export interface ScenarioDocs {
+  overview: string;
+  functionalRequirements: string[];
+  nonFunctionalRequirements: string[];
+  constraints: string[];
+}
+
 export interface ScenarioEntry {
   id: string;
   name: string;
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   tags: string[];
+  docs: ScenarioDocs;
   template: ArchitectureTemplate;
 }
 
@@ -546,6 +554,33 @@ export const SCENARIO_LIBRARY: ScenarioEntry[] = [
       'Spike traffic hits a token-bucket rate limiter before reaching the Payment API. A CPU-bound Fraud Detection engine is deliberately under-provisioned — watch it saturate and the rate limiter queue fill during bursts.',
     difficulty: 'advanced',
     tags: ['Payments', 'Rate Limiter', 'Fraud Detection', 'Pub/Sub'],
+    docs: {
+      overview:
+        'A PCI-DSS-compliant payment pipeline that accepts card and wallet transactions, screens them for fraud, persists to a write-optimised ledger, and asynchronously dispatches settlement notifications. The system must survive burst traffic from flash sales while keeping the fraud-detection path synchronous on the critical transaction flow.',
+      functionalRequirements: [
+        'Accept payment requests (card, wallet, bank transfer) via a REST API',
+        'Run synchronous fraud scoring on every transaction before authorisation',
+        'Persist each transaction to an append-only ledger with idempotency guarantees',
+        'Publish settlement events to downstream notification and reconciliation consumers',
+        'Support idempotent retries — duplicate payment requests must not double-charge',
+        'Return a definitive accept / decline response within the request lifecycle',
+      ],
+      nonFunctionalRequirements: [
+        'p99 end-to-end transaction latency ≤ 500 ms under normal load',
+        'System availability ≥ 99.99% (< 53 min downtime per year)',
+        'Fraud engine must process ≥ 1 500 RPS sustained; burst to 5 000 RPS for ≤ 30 s',
+        'Zero tolerance for lost transactions — at-least-once delivery on the settlement bus',
+        'Full audit log retained for ≥ 7 years (regulatory requirement)',
+        'PCI-DSS Level 1 compliance: card data encrypted in transit and at rest',
+      ],
+      constraints: [
+        'Fraud Detection engine is CPU-bound (ML inference) — single instance, 250 RPS cap; scale-out requires model-sharding work not yet completed',
+        'Transaction DB has no read replicas: all reads hit the primary to ensure read-your-writes consistency after a write',
+        'Rate limiter uses token-bucket algorithm — burst capacity absorbs flash-sale spikes but queue fills quickly if fraud engine is saturated',
+        'Payment API instances must not cache authorisation decisions locally (stateless mandate for PCI scope reduction)',
+        'Settlement Pub/Sub retention is 72 hours; downstream consumers must checkpoint offsets or risk re-processing on restart',
+      ],
+    },
     template: buildPaymentProcessing(),
   },
   {
@@ -555,6 +590,35 @@ export const SCENARIO_LIBRARY: ScenarioEntry[] = [
       'Chaotic 8 000 RPS order flow through a CPU-bound Order Matching Engine writing to NVMe block storage. Market-data events fan out to a Risk Engine and a Market Data Feed via Pub/Sub.',
     difficulty: 'advanced',
     tags: ['HFT', 'Block Storage', 'Pub/Sub', 'CPU-Bound'],
+    docs: {
+      overview:
+        'A low-latency order-matching platform that accepts buy/sell orders, executes price-time priority matching, persists the trade ledger, and broadcasts real-time market-data events. The matching engine is the system\'s critical path — every microsecond of added latency translates directly to adverse fills for clients.',
+      functionalRequirements: [
+        'Accept market, limit, and stop orders from connected trading clients',
+        'Match orders by price-time priority (FIFO within the same price level)',
+        'Maintain a live order book persisted to NVMe block storage (memory-mapped)',
+        'Persist confirmed trades to a sharded, durable trade ledger',
+        'Broadcast real-time market-data events (trades, order book deltas) to subscribers',
+        'Enforce per-client and portfolio-level risk limits via the Risk Engine before fills',
+        'Provide a cancel/replace API with deterministic acknowledgement ordering',
+      ],
+      nonFunctionalRequirements: [
+        'Order matching round-trip latency ≤ 1 ms p99 (wire-to-wire)',
+        'Throughput ≥ 50 000 orders/sec sustained across matching engine instances',
+        'Zero order loss — all accepted orders must reach the ledger or be explicitly rejected',
+        'Deterministic execution: same input sequence must always produce the same match sequence',
+        'Market-data fan-out latency ≤ 5 ms from match event to subscriber delivery',
+        'Risk Engine decisions must complete in ≤ 200 µs to stay off the critical path',
+      ],
+      constraints: [
+        'Order book must be memory-mapped to NVMe — no network-attached storage on the matching critical path',
+        'Matching engine instances are CPU-bound (lock-free ring buffers, kernel-bypass networking); adding instances requires careful NUMA-aware partitioning',
+        'Trade Ledger has no read replicas on the write path — replication is async to avoid synchronous latency penalty',
+        'Risk Engine and Market Data Feed consume from Pub/Sub asynchronously — they are not in the order-acceptance critical path',
+        'Pub/Sub retention is only 2 hours — downstream consumers must maintain their own state snapshots',
+        'Chaos traffic pattern (0.3×–1.7× RPS variance) models real market volatility; system must not drop orders during burst',
+      ],
+    },
     template: buildHighFrequencyTrading(),
   },
   {
@@ -564,6 +628,35 @@ export const SCENARIO_LIBRARY: ScenarioEntry[] = [
       'Upload service writes raw media to Cloud Storage, which enqueues transcoding jobs. A CPU-intensive Worker Pool converts assets and writes to NVMe storage, then pushes finished content to a global CDN.',
     difficulty: 'intermediate',
     tags: ['Video', 'Worker Pool', 'CDN', 'Cloud Storage'],
+    docs: {
+      overview:
+        'An asynchronous media processing pipeline that ingests raw audio/video uploads, queues transcoding jobs, converts assets into multiple resolution/bitrate variants (HLS, DASH), and publishes the finished files to a global CDN for low-latency playback. The pipeline is designed for high throughput, not low latency — a job queued now may complete minutes later.',
+      functionalRequirements: [
+        'Accept raw video/audio uploads (up to several GB per file) via the Upload Service',
+        'Durably store raw media in object storage before acknowledging the upload',
+        'Enqueue a transcoding job for each accepted upload on the job queue',
+        'Transcode source files into multiple output variants (e.g. 4K, 1080p, 720p, 360p, audio-only)',
+        'Write encoded output to fast block storage and invalidate / populate CDN edge caches',
+        'Notify the originating application when transcoding completes (or fails)',
+        'Support resumable uploads for large files and retry failed transcode jobs up to 3 times',
+      ],
+      nonFunctionalRequirements: [
+        'HD (1080p) transcode turnaround ≤ 5 minutes from upload completion under normal load',
+        'Pipeline throughput ≥ 400 uploads/min sustained (scalable via additional worker instances)',
+        'Raw media durability ≥ 99.999999999% (Cloud Storage eleven-nines guarantee)',
+        'CDN availability ≥ 99.9% for playback; cache hit rate ≥ 90% for popular content',
+        'No upload loss — object storage must acknowledge write before job is enqueued',
+        'Encoded output stored on NVMe with ≥ 50 000 IOPS to sustain concurrent CDN origin pulls',
+      ],
+      constraints: [
+        'Transcoding is CPU-bound: each worker thread handles one job at a time (3 s per HD job at current worker config)',
+        'Cloud Storage ops/sec is limited by object size (512 MB average) and throughput cap — large files reduce effective RPS',
+        'Worker pool queue depth grows under ramp load; backlog can reach several thousand jobs during sustained bursts',
+        'CDN cache TTL must be set longer than the maximum transcode duration to avoid stale-content windows',
+        'Block storage IOPS limit (50 000) is shared between transcode writes and CDN origin reads — hot content can create contention',
+        'Pub/Sub retention is 48 hours — if all workers go offline for longer, unacknowledged jobs will be lost',
+      ],
+    },
     template: buildAvProcessingPipeline(),
   },
   {
@@ -573,6 +666,35 @@ export const SCENARIO_LIBRARY: ScenarioEntry[] = [
       'WebSocket gateway with sticky load balancing, Redis for presence/session, Pub/Sub fan-out to delivery workers, and MongoDB for message history. Autoscaling gateway responds to wave-pattern traffic.',
     difficulty: 'intermediate',
     tags: ['WebSocket', 'Pub/Sub', 'Cache', 'Autoscaling'],
+    docs: {
+      overview:
+        'A real-time messaging platform built on persistent WebSocket connections. The gateway layer maintains long-lived client connections and publishes outbound messages to a fan-out bus; delivery workers push messages to recipients across devices. Redis provides sub-millisecond presence and session lookups; MongoDB stores the durable message history.',
+      functionalRequirements: [
+        'Establish and maintain persistent WebSocket connections for authenticated clients',
+        'Deliver messages to all online recipients of a conversation in real time (≤ 100 ms)',
+        'Track and broadcast user presence (online/offline/typing) with ≤ 5 s staleness',
+        'Persist all messages to durable storage for history retrieval and compliance',
+        'Support multi-device delivery — a user\'s message must reach all their active sessions',
+        'Allow clients to retrieve paginated message history for any conversation',
+        'Handle graceful reconnection — buffer messages for briefly-offline clients (up to 30 s)',
+      ],
+      nonFunctionalRequirements: [
+        'Message delivery latency ≤ 100 ms p99 for online recipients under normal load',
+        'Support ≥ 1 million concurrent WebSocket connections across the gateway fleet',
+        'Gateway autoscales between 3 and 16 instances; scale-up triggers at 70% CPU load',
+        'Message durability: zero loss after the sender receives an acknowledgement',
+        'Pub/Sub fan-out must handle 3 500 RPS sustained; subscriber lag must stay < 2 000 ms',
+        'Redis cluster must maintain ≥ 85% cache hit rate for presence lookups',
+      ],
+      constraints: [
+        'Load balancer must use ip_hash (sticky sessions) — WebSocket connections are stateful and cannot migrate between gateway instances mid-session',
+        'Redis TTL for presence is 300 s — clients must heartbeat at least every 5 minutes or be marked offline',
+        'Pub/Sub fan-out amplifies write load: one sent message becomes N delivery-worker tasks (one per recipient device)',
+        'MongoDB is sharded by conversation ID — cross-shard history queries are expensive and should be avoided',
+        'Autoscaling warmup (cold provision) takes ~3 s; cold-start latency is visible to clients connecting during a scale-out event',
+        'Delivery workers are stateless — failed deliveries (e.g. push notification timeout) are not automatically retried by the worker pool',
+      ],
+    },
     template: buildRealTimeChat(),
   },
   {
@@ -582,6 +704,35 @@ export const SCENARIO_LIBRARY: ScenarioEntry[] = [
       'Spike traffic flows through a CDN (map tiles) → Location Service (autoscaling) backed by a short-TTL driver-location cache and a geo-indexed DB. Match requests are queued via Pub/Sub and processed by a geospatial Worker Pool.',
     difficulty: 'advanced',
     tags: ['Geolocation', 'Autoscaling', 'CDN', 'Pub/Sub', 'Serverless'],
+    docs: {
+      overview:
+        'A geo-matching platform that handles ride requests, real-time driver location updates, and the matching algorithm that pairs riders with the nearest available driver. Static map tiles are served from CDN edge caches to reduce origin load. The matching algorithm is CPU-intensive (geospatial nearest-neighbour search) and runs asynchronously in a worker pool after the rider request has been acknowledged.',
+      functionalRequirements: [
+        'Accept ride requests from riders and update location from drivers every 5 seconds',
+        'Serve map tile assets from CDN edge nodes (80% cache hit rate expected)',
+        'Store and query current driver locations with geospatial indexing (PostGIS / R-tree)',
+        'Enqueue match requests and process them asynchronously in the Matching Engine',
+        'Dispatch push notifications to matched drivers and riders via the Push Notifier function',
+        'Provide a trip-status API with real-time ETA based on current driver location',
+        'Cancel unmatched requests after a configurable timeout and notify the rider',
+      ],
+      nonFunctionalRequirements: [
+        'Median time-to-match ≤ 30 s from rider request submission',
+        'Location update write throughput ≥ 5 000 updates/sec (one per active driver every 5 s)',
+        'Location Service autoscales between 2 and 12 instances; scale-up at 65% CPU',
+        'Push Notifier cloud function delivers ≥ 99.9% of notifications within 10 s',
+        'Driver location cache must reflect updates within ≤ 15 s (two TTL cycles)',
+        'System must handle 3× normal load spikes (e.g. end of concerts, bad weather) without SLA degradation',
+      ],
+      constraints: [
+        'Driver location cache TTL is only 10 s — the matching engine may act on location data up to 10 s stale; fast-moving drivers may have moved since cache write',
+        'Location Service uses autoscaling with a 2-instance minimum — during scale-up events (cold provision ~3 s) new instances are unavailable, increasing per-instance load transiently',
+        'Geo DB is sharded by city region — cross-shard queries (e.g. large metropolitan areas spanning shard boundaries) require scatter-gather and are significantly slower',
+        'Matching Engine worker pool is CPU-bound (geospatial nearest-neighbour); queue depth climbs during demand spikes faster than workers can drain it',
+        'Pub/Sub retention is only 1 hour — if all matching workers go offline for longer, pending match requests are lost and riders must re-request',
+        'Push Notifier is a serverless function with 300 concurrent invocation limit; at peak notification bursts (end of surge) throttled invocations will be dropped',
+      ],
+    },
     template: buildRideSharingPlatform(),
   },
 ];

@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { ReactFlowProvider } from 'reactflow';
@@ -7,7 +8,10 @@ import Canvas from '@/components/canvas/Canvas';
 import ComponentLibrary from '@/components/sidebar/ComponentLibrary';
 import Inspector from '@/components/inspector/Inspector';
 import MetricsDashboard from '@/components/simulation/MetricsDashboard';
+import ScenarioDocsDrawer from '@/components/simulation/ScenarioDocsDrawer';
 import { useSimulationStore } from '@/store/simulationStore';
+import { useArchitectureStore } from '@/store/architectureStore';
+import { SCENARIO_LIBRARY } from '@/templates/scenarios';
 
 export default function SimulatorPage() {
   const { theme, toggleTheme } = useTheme();
@@ -15,6 +19,10 @@ export default function SimulatorPage() {
   const start   = useSimulationStore((s) => s.start);
   const stop    = useSimulationStore((s) => s.stop);
   const reset   = useSimulationStore((s) => s.reset);
+
+  const activeScenarioId = useArchitectureStore((s) => s.activeScenarioId);
+  const activeScenario   = SCENARIO_LIBRARY.find((s) => s.id === activeScenarioId) ?? null;
+  const [docsOpen, setDocsOpen] = useState(false);
 
   return (
     <ReactFlowProvider>
@@ -51,6 +59,41 @@ export default function SimulatorPage() {
           <span style={{ color: 'var(--accent-cyan)', fontWeight: 600, fontSize: 13, letterSpacing: 2 }}>SIMULATOR</span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Scenario Docs */}
+            {activeScenario && (
+              <button
+                onClick={() => setDocsOpen(true)}
+                title="View scenario requirements & constraints"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 12px',
+                  border: '1px solid var(--accent-orange)',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: 'var(--accent-orange)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  letterSpacing: '0.05em',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-orange)';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--bg-base)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-orange)';
+                }}
+              >
+                <span style={{ fontSize: 12 }}>📋</span>
+                DOCS
+              </button>
+            )}
+
             {/* Run / Stop */}
             <button
               onClick={() => running ? stop() : start()}
@@ -137,6 +180,15 @@ export default function SimulatorPage() {
           <MetricsDashboard />
         </div>
       </div>
+
+      {/* Scenario docs drawer */}
+      {docsOpen && activeScenario && (
+        <ScenarioDocsDrawer
+          scenarioName={activeScenario.name}
+          docs={activeScenario.docs}
+          onClose={() => setDocsOpen(false)}
+        />
+      )}
     </ReactFlowProvider>
   );
 }

@@ -42,7 +42,7 @@ export default function Dashboard() {
   function openScenario(entry: ScenarioEntry) {
     stop();
     reset();
-    loadTemplate(entry.template);
+    loadTemplate(entry.template, entry.id);
     router.push('/simulator');
   }
 
