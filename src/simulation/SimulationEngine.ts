@@ -973,56 +973,75 @@ export function runSimulationTick(
         const obsLevel    = config.observabilityLevel ?? 'basic';
         const meshRetries = config.meshRetryCount ?? 1;
 
-        // Latency base = proxy overhead (baseLatency) + mTLS handshake + observability overhead
         const mtlsOverhead = mtls ? 1 : 0;
         const obsOverhead  = obsLevel === 'full' ? 1 : obsLevel === 'basic' ? 0.5 : 0;
-        latencyMs = baseLatency + mtlsOverhead + obsOverhead + Math.pow(Math.min(load, 2.0), 2) * 200;
+        const proxyBase    = baseLatency + mtlsOverhead + obsOverhead;
+        const queuePenalty = Math.pow(Math.min(load, 2.0), 2) * 200;
 
-        // Use previous tick's error rate to avoid feedback amplification instability.
-        // The circuit breaker observes the previous error rate passing through the mesh.
-        const prevMeshErrorRate = prevNodeMetrics?.errorRate ?? 0;
-        const circuitBroken     = cbEnabled && prevMeshErrorRate >= cbThreshold;
+        // ── Observe downstream health (previous tick for stability) ──────────
+        // The mesh is a synchronous pass-through: if a downstream node is slow or
+        // failing, every caller waiting through the mesh sees that slowdown/error.
+        const meshDownstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+          (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+        );
+        let downstreamErrorRate = 0;
+        let downstreamLatencyMs = 0;
+        for (const tid of meshDownstreamIds) {
+          const ds = previousMetrics[tid];
+          if (ds) {
+            // Worst-case downstream error rate: even one failing backend causes errors
+            downstreamErrorRate = Math.max(downstreamErrorRate, ds.errorRate);
+            // Worst-case downstream latency: slow backend stalls the proxy
+            downstreamLatencyMs = Math.max(downstreamLatencyMs, ds.latencyMs);
+          }
+        }
+
+        // Circuit breaker watches downstream error rate, not the mesh's own load.
+        // This is the correct model: CB opens when services behind the mesh are failing.
+        const circuitBroken = cbEnabled && downstreamErrorRate >= cbThreshold;
+
+        // The mesh is communication infrastructure — the fabric itself never fails.
+        // load reflects proxy throughput utilisation (very high capacity, never saturates).
+        // failed is always false: only the services behind the mesh can fail.
+        load   = Math.min(rpsIn / 50000, 0.95); // proxy headroom, same ceiling as LB
+        failed = false;
 
         if (circuitBroken) {
-          // Open circuit: fast-fail almost all traffic (5 % allowed for health checks)
-          rpsOut    = rpsIn * 0.05;
-          load      = 1.2;
-          failed    = true;
+          // Open circuit: intentional fast-fail — the mesh is healthy, acting correctly.
+          // Callers see high error rate because the CB is protecting them from a bad service,
+          // not because the mesh itself is broken.
+          rpsOut    = rpsIn * 0.05; // 5 % passes for health probes
           errorRate = 0.95;
-          latencyMs = baseLatency + 1; // fail-fast path — no queuing penalty
+          latencyMs = proxyBase + 1; // fail-fast — no downstream wait
         } else {
-          const dropRate = computeDropRate(load);
-          rpsOut    = rpsIn * (1 - dropRate);
-          errorRate = computeErrorRate(load);
+          // Pass-through: forward traffic minus any proxy-level drops (negligible at normal load).
+          rpsOut = rpsIn * (1 - computeDropRate(load));
 
-          if (meshRetries > 0) {
-            // ── Retry policy ───────────────────────────────────────────────────
-            // 1. Retries add latency: the caller waits while the mesh retries failing
-            //    requests. Average extra wait = P(retry) × retries × proxy round-trip.
-            //    Uses prevMeshErrorRate so the first retry tick is zero (stable).
-            const retryLatencyMs = prevMeshErrorRate * meshRetries * baseLatency;
-            latencyMs += retryLatencyMs;
+          // Error rate reflects downstream failures flowing through the mesh.
+          // The mesh itself contributes near-zero errors (computeErrorRate(load) ≈ 0).
+          errorRate = downstreamErrorRate * 0.9;
 
-            // 2. Retries reduce effective caller-visible error rate.
-            //    P(all n+1 attempts fail) = errorRate^(n+1).
-            //    At low error rates this approaches zero quickly; at high rates it
-            //    still fails but with fewer 5xx returned to the caller.
-            errorRate = Math.pow(Math.min(errorRate, 0.99), meshRetries + 1);
+          // Latency = proxy overhead + downstream wait.
+          // The mesh is synchronous: it cannot return until the downstream responds.
+          // A slow downstream makes every caller waiting through the mesh wait just as long.
+          latencyMs = proxyBase + downstreamLatencyMs;
 
-            // 3. Downstream sees amplified traffic: original rpsOut + retried portion.
-            //    Cap at 2× rpsIn to prevent runaway amplification.
-            //    Uses prevMeshErrorRate for stability (avoids same-tick feedback loop).
-            const retryAmplification = 1 + prevMeshErrorRate * meshRetries * 0.8;
+          if (meshRetries > 0 && downstreamErrorRate > 0) {
+            // 1. Each retry adds a proxy round-trip worth of latency.
+            latencyMs += downstreamErrorRate * meshRetries * baseLatency;
+
+            // 2. Retries reduce caller-visible error rate: P(all n+1 attempts fail).
+            errorRate = Math.pow(Math.min(downstreamErrorRate, 0.99), meshRetries + 1);
+
+            // 3. Downstream sees amplified RPS from retried requests.
+            const retryAmplification = 1 + downstreamErrorRate * meshRetries * 0.8;
             rpsOut = Math.min(rpsIn * 2, rpsOut * retryAmplification);
           }
         }
 
-        // Active connections: each request holds a sidecar connection for ~proxyOverheadMs
         const activeConnections = Math.round(rpsIn * (config.proxyOverheadMs ?? 2) / 1000);
-        // mTLS handshake rate: ~10 % of connections are new (TLS establishment)
         const mtlsHandshakeRate = mtls ? Math.round(rpsIn * 0.1) : 0;
-        // Retry rate: fraction of in-flight requests being retried this tick
-        const retryRate = meshRetries > 0 ? Math.min(0.8, prevMeshErrorRate * meshRetries) : 0;
+        const retryRate = meshRetries > 0 ? Math.min(0.8, downstreamErrorRate * meshRetries) : 0;
 
         detail = { kind: 'service_mesh', activeConnections, mtlsHandshakeRate, circuitBroken, retryRate };
         break;

@@ -304,6 +304,160 @@ function buildReadHeavy(): ArchitectureTemplate {
 }
 
 // ---------------------------------------------------------------------------
+// 9. Microservices with Service Mesh
+// ---------------------------------------------------------------------------
+
+function buildServiceMesh(): ArchitectureTemplate {
+  const nodes: Node[] = [
+    // Ingress
+    makeNode('sm-tgen',    'traffic_generator', 60,   300),
+    makeNode('sm-lb',      'load_balancer',     280,  300),
+    makeNode('sm-mesh',    'service_mesh',      720,  300),
+    // Services
+    makeNode('sm-user',    'app_server',        960,  80),
+    makeNode('sm-order',   'app_server',        960,  240),
+    makeNode('sm-payment', 'app_server',        960,  400),
+    makeNode('sm-notify',  'app_server',        960,  545),
+    // Backing stores
+    makeNode('sm-ucache',  'cache',             1190, 30),
+    makeNode('sm-udb',     'database',          1190, 150),
+    makeNode('sm-odb',     'database',          1190, 270),
+    makeNode('sm-pdb',     'database',          1190, 420),
+  ];
+
+  const edges: Edge[] = [
+    // Ingress chain
+    makeEdge('sm-tgen',    'sm-lb'),
+    makeEdge('sm-lb',    'sm-mesh'),
+    // Mesh → services (weights set in meshRoutes; splitPct resolved at tick time)
+    makeEdge('sm-mesh',    'sm-user'),
+    makeEdge('sm-mesh',    'sm-order'),
+    makeEdge('sm-mesh',    'sm-payment'),
+    makeEdge('sm-mesh',    'sm-notify'),
+    // Service → backing stores
+    makeEdge('sm-user',    'sm-ucache'),
+    makeEdge('sm-user',    'sm-udb'),
+    makeEdge('sm-order',   'sm-odb'),
+    makeEdge('sm-payment', 'sm-pdb'),
+  ];
+
+  return {
+    nodes,
+    edges,
+    nodeConfigs: {
+      // ── Ingress ──────────────────────────────────────────────────────────
+      'sm-tgen': makeConfig('traffic_generator', {
+        label:            'Traffic Generator',
+        generatorRps:     800,
+        generatorPattern: 'spike',   // 3.5× burst → stresses Payment Service
+        readRatioPct:     65,
+      }),
+      'sm-lb': makeConfig('load_balancer', {
+        label:        'Edge LB',
+        algorithm:    'round_robin',
+        healthChecks: true,
+      }),
+      'sm-api': makeConfig('app_server', {
+        label:          'API Gateway',
+        instances:      2,
+        rpsPerInstance: 1200,
+        workloadType:   'io_bound',
+        avgLatencyMs:   15,
+      }),
+
+      // ── Service Mesh ─────────────────────────────────────────────────────
+      // mTLS on, full observability, 2 retries, CB at 50%.
+      // Routing table splits traffic 50/30/15/5 across the four services.
+      // During a spike Payment Service (200 RPS cap) will overload → errorRate
+      // rises → mesh CB opens → callers see fast-fail until service recovers.
+      'sm-mesh': makeConfig('service_mesh', {
+        label:                       'Service Mesh',
+        mtlsEnabled:                 true,
+        proxyOverheadMs:             2,
+        observabilityLevel:          'full',
+        meshRetryCount:              2,
+        meshCircuitBreakerEnabled:   true,
+        meshCircuitBreakerThreshold: 50,
+        meshRoutes: [
+          { id: 'smr1', sourceNodeId: 'sm-api', destNodeId: 'sm-user',    weightPct: 50 },
+          { id: 'smr2', sourceNodeId: 'sm-api', destNodeId: 'sm-order',   weightPct: 30 },
+          { id: 'smr3', sourceNodeId: 'sm-api', destNodeId: 'sm-payment', weightPct: 15 },
+          { id: 'smr4', sourceNodeId: 'sm-api', destNodeId: 'sm-notify',  weightPct: 5  },
+        ],
+      }),
+
+      // ── Services ─────────────────────────────────────────────────────────
+      // User Service: 2× instances, comfortably handles its 50% share at normal
+      // load; slightly stressed during spike peaks.
+      'sm-user': makeConfig('app_server', {
+        label:          'User Service',
+        instances:      2,
+        rpsPerInstance: 600,
+        workloadType:   'io_bound',
+        avgLatencyMs:   30,
+      }),
+      // Order Service: 2× instances, handles write-heavy checkout traffic.
+      'sm-order': makeConfig('app_server', {
+        label:          'Order Service',
+        instances:      2,
+        rpsPerInstance: 500,
+        workloadType:   'io_bound',
+        avgLatencyMs:   55,
+      }),
+      // Payment Service: deliberately single instance / low cap (CPU-bound,
+      // crypto ops). At spike: 15% × 2800 = 420 RPS against a 200 RPS cap
+      // → load > 2× → failed → mesh CB opens. Lower rpsPerInstance to see
+      // the circuit breaker trip; raise it to see retries absorb the errors.
+      'sm-payment': makeConfig('app_server', {
+        label:          'Payment Service',
+        instances:      1,
+        rpsPerInstance: 200,
+        workloadType:   'cpu_bound',
+        avgLatencyMs:   80,
+      }),
+      // Notification Service: fire-and-forget, very low traffic share, never
+      // a bottleneck — demonstrates a healthy path alongside failing ones.
+      'sm-notify': makeConfig('app_server', {
+        label:          'Notification Svc',
+        instances:      2,
+        rpsPerInstance: 400,
+        workloadType:   'io_bound',
+        avgLatencyMs:   20,
+      }),
+
+      // ── Backing stores ───────────────────────────────────────────────────
+      'sm-ucache': makeConfig('cache', {
+        label:          'Session Cache',
+        memoryGb:       16,
+        ttlSeconds:     300,
+        evictionPolicy: 'lru',
+      }),
+      'sm-udb': makeConfig('database', {
+        label:        'Users DB',
+        engine:       'PostgreSQL',
+        readReplicas: 1,
+        rpsPerShard:  600,
+      }),
+      'sm-odb': makeConfig('database', {
+        label:        'Orders DB',
+        engine:       'PostgreSQL',
+        readReplicas: 1,
+        rpsPerShard:  450,
+      }),
+      // Payment DB: no read replicas, lower cap — a second potential bottleneck
+      // once Payment Service eventually recovers or CB resets.
+      'sm-pdb': makeConfig('database', {
+        label:        'Payment DB',
+        engine:       'PostgreSQL',
+        readReplicas: 0,
+        rpsPerShard:  250,
+      }),
+    },
+    edgeConfigs: edgeConfigs(edges),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -371,5 +525,13 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     difficulty: 'advanced',
     tags: ['Rate Limiter', 'Cache', 'Read Replicas'],
     template: buildReadHeavy(),
+  },
+  {
+    id: 'service-mesh',
+    name: 'Microservices + Service Mesh',
+    description: 'Four services behind an Istio-style mesh with mTLS, retries, and circuit breaking. Spike traffic overloads the Payment Service — watch the circuit breaker open and propagate errors back through the mesh.',
+    difficulty: 'advanced',
+    tags: ['Service Mesh', 'Circuit Breaker', 'Microservices', 'mTLS'],
+    template: buildServiceMesh(),
   },
 ];
