@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import Sparkline from '@/components/shared/Sparkline';
+import type { Node } from 'reactflow';
 // Helper to get global RPS history (sum of all node rpsIn)
 import { useRef } from 'react';
 // --- Global RPS history hook ---
@@ -14,13 +15,11 @@ function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints
   return historyRef.current;
 }
 
-// --- Global error-rate history hook (max node errorRate) ---
-function useGlobalErrorRateHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints = 100) {
+// --- Global error-rate history hook ---
+function useGlobalErrorRateHistory(globalErrorRate: number, maxPoints = 100) {
   const historyRef = useRef<number[]>([]);
-  const all = Object.values(nodeMetrics);
-  const maxErrorRate = all.length === 0 ? 0 : Math.max(...all.map((m) => m.errorRate || 0));
-  if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== maxErrorRate) {
-    historyRef.current = [...historyRef.current.slice(-maxPoints + 1), maxErrorRate];
+  if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== globalErrorRate) {
+    historyRef.current = [...historyRef.current.slice(-maxPoints + 1), globalErrorRate];
   }
   return historyRef.current;
 }
@@ -28,7 +27,7 @@ import NodeMetricCard from './NodeMetricCard';
 import EventLog from './EventLog';
 import { useSimulationStore } from '@/store/simulationStore';
 import { useArchitectureStore } from '@/store/architectureStore';
-import type { NodeMetrics } from '@/types';
+import type { NodeMetrics, NodeConfig } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Global metric helpers
@@ -43,8 +42,126 @@ interface GlobalMetrics {
   status: SystemStatus;
 }
 
+// Containers don't contribute directly to error rate — only their children do.
+const CONTAINER_TYPES = new Set(['region', 'availability_zone']);
+
+/**
+ * Computes propagated error rates for zone and region container nodes by
+ * aggregating their children's error rates (weighted by rpsIn).
+ * Returns a map of nodeId → effective error rate for zone/region nodes.
+ */
+function computeZoneRegionErrorRates(
+  nodeMetrics: Record<string, NodeMetrics>,
+  nodes: Node[],
+  nodeConfigs: Record<string, NodeConfig>
+): Record<string, number> {
+  const result: Record<string, number> = {};
+
+  // Zone error rate = weighted avg of all nodes with zoneId pointing to this zone
+  const zoneNodes = nodes.filter(n => n.type === 'availability_zone');
+  for (const zone of zoneNodes) {
+    const children = nodes.filter(n => nodeConfigs[n.id]?.zoneId === zone.id);
+    const totalRps = children.reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
+    result[zone.id] = totalRps === 0 ? 0 :
+      children.reduce((s, n) => s + (nodeMetrics[n.id]?.errorRate || 0) * (nodeMetrics[n.id]?.rpsIn || 0), 0) / totalRps;
+  }
+
+  // Region error rate = weighted avg of all resource nodes in this region
+  // (direct regional children + all children of zones in this region)
+  const regionNodes = nodes.filter(n => n.type === 'region');
+  for (const region of regionNodes) {
+    const zonesInRegion = zoneNodes.filter(n => nodeConfigs[n.id]?.regionId === region.id);
+    const zonalIds = new Set(zonesInRegion.map(z => z.id));
+
+    const resourceNodes = nodes.filter(n => {
+      if (CONTAINER_TYPES.has(String(n.type))) return false;
+      const cfg = nodeConfigs[n.id];
+      // Direct regional node
+      if (cfg?.regionId === region.id && !cfg?.zoneId) return true;
+      // Zonal node whose zone is in this region
+      if (cfg?.zoneId && zonalIds.has(cfg.zoneId)) return true;
+      return false;
+    });
+
+    const totalRps = resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
+    result[region.id] = totalRps === 0 ? 0 :
+      resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.errorRate || 0) * (nodeMetrics[n.id]?.rpsIn || 0), 0) / totalRps;
+  }
+
+  return result;
+}
+
+/**
+ * Global error rate = weighted avg across all non-container resource nodes,
+ * propagated upward through zone → region → global hierarchy.
+ */
+function computeGlobalErrorRate(
+  nodeMetrics: Record<string, NodeMetrics>,
+  nodes: Node[],
+  nodeConfigs: Record<string, NodeConfig>,
+  propagatedErrorRates: Record<string, number>
+): number {
+  const regionNodes = nodes.filter(n => n.type === 'region');
+
+  if (regionNodes.length === 0) {
+    // No regions: simple weighted avg over all non-container nodes
+    const resourceNodes = nodes.filter(n => !CONTAINER_TYPES.has(String(n.type)));
+    const totalRps = resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
+    return totalRps === 0 ? 0 :
+      resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.errorRate || 0) * (nodeMetrics[n.id]?.rpsIn || 0), 0) / totalRps;
+  }
+
+  // Nodes that belong to a region (directly or via a zone)
+  const zoneNodes = nodes.filter(n => n.type === 'availability_zone');
+  const regionNodeIds = new Set(regionNodes.map(r => r.id));
+  const affiliatedIds = new Set<string>();
+  for (const n of nodes) {
+    const cfg = nodeConfigs[n.id];
+    if (cfg?.regionId && regionNodeIds.has(cfg.regionId)) affiliatedIds.add(n.id);
+    if (cfg?.zoneId) {
+      const zoneCfg = nodeConfigs[cfg.zoneId];
+      if (zoneCfg?.regionId && regionNodeIds.has(zoneCfg.regionId)) affiliatedIds.add(n.id);
+    }
+  }
+
+  let totalRps = 0;
+  let weightedSum = 0;
+
+  // Region contributions
+  for (const region of regionNodes) {
+    const zonesInRegion = zoneNodes.filter(n => nodeConfigs[n.id]?.regionId === region.id);
+    const zonalIds = new Set(zonesInRegion.map(z => z.id));
+    const regionRps = nodes
+      .filter(n => {
+        if (CONTAINER_TYPES.has(String(n.type))) return false;
+        const cfg = nodeConfigs[n.id];
+        if (cfg?.regionId === region.id && !cfg?.zoneId) return true;
+        if (cfg?.zoneId && zonalIds.has(cfg.zoneId)) return true;
+        return false;
+      })
+      .reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
+    totalRps += regionRps;
+    weightedSum += (propagatedErrorRates[region.id] || 0) * regionRps;
+  }
+
+  // Unaffiliated non-container nodes (global nodes not in any region)
+  for (const n of nodes) {
+    if (CONTAINER_TYPES.has(String(n.type))) continue;
+    if (affiliatedIds.has(n.id)) continue;
+    const m = nodeMetrics[n.id];
+    if (!m) continue;
+    totalRps += m.rpsIn || 0;
+    weightedSum += (m.errorRate || 0) * (m.rpsIn || 0);
+  }
+
+  return totalRps === 0 ? 0 : weightedSum / totalRps;
+}
+
 function computeGlobalMetrics(
-  nodeMetrics: Record<string, NodeMetrics>
+  nodeMetrics: Record<string, NodeMetrics>,
+  nodes: Node[],
+  nodeConfigs: Record<string, NodeConfig>,
+  propagatedErrorRates: Record<string, number>
 ): GlobalMetrics {
   const all = Object.values(nodeMetrics);
 
@@ -54,7 +171,7 @@ function computeGlobalMetrics(
 
   const liveRps       = Math.max(...all.map((m) => m.rpsIn));
   const e2eLatencyMs  = all.reduce((sum, m) => sum + m.latencyMs, 0);
-  const errRate       = Math.max(...all.map((m) => m.errorRate));
+  const errRate       = computeGlobalErrorRate(nodeMetrics, nodes, nodeConfigs, propagatedErrorRates);
   const maxLoad       = Math.max(...all.map((m) => m.load));
   const anyFailed     = all.some((m) => m.failed);
 
@@ -90,11 +207,19 @@ function formatMs(ms: number): string {
 
 
 export default function MetricsDashboard() {
-  const nodeMetrics = useSimulationStore((s) => s.nodeMetrics);
-  const nodes       = useArchitectureStore((s) => s.nodes);
-  const global = useMemo(() => computeGlobalMetrics(nodeMetrics), [nodeMetrics]);
+  const nodeMetrics  = useSimulationStore((s) => s.nodeMetrics);
+  const nodes        = useArchitectureStore((s) => s.nodes);
+  const nodeConfigs  = useArchitectureStore((s) => s.nodeConfigs);
+  const propagatedErrorRates = useMemo(
+    () => computeZoneRegionErrorRates(nodeMetrics, nodes, nodeConfigs),
+    [nodeMetrics, nodes, nodeConfigs]
+  );
+  const global = useMemo(
+    () => computeGlobalMetrics(nodeMetrics, nodes, nodeConfigs, propagatedErrorRates),
+    [nodeMetrics, nodes, nodeConfigs, propagatedErrorRates]
+  );
   const globalRpsHistory = useGlobalRpsHistory(nodeMetrics, 100);
-  const globalErrorHistory = useGlobalErrorRateHistory(nodeMetrics, 100);
+  const globalErrorHistory = useGlobalErrorRateHistory(global.errRate, 100);
 
   return (
     <div
@@ -206,7 +331,13 @@ export default function MetricsDashboard() {
               Add nodes to the canvas to begin
             </div>
           ) : (
-            nodes.map((n) => <NodeMetricCard key={n.id} nodeId={n.id} />)
+            nodes.map((n) => (
+              <NodeMetricCard
+                key={n.id}
+                nodeId={n.id}
+                overrideErrorRate={propagatedErrorRates[n.id]}
+              />
+            ))
           )}
         </div>
       </div>

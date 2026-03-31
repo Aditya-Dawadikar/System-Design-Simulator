@@ -9,6 +9,7 @@ import type { ComponentType, ComponentDetail } from '@/types';
 
 interface NodeMetricCardProps {
   nodeId: string;
+  overrideErrorRate?: number;
 }
 
 function formatRps(rps: number): string {
@@ -29,7 +30,7 @@ function getStatusLabel(load: number, failed: boolean): { label: string; color: 
   return                             { label: 'IDLE',      color: 'var(--text-dim)' };
 }
 
-export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
+export default function NodeMetricCard({ nodeId, overrideErrorRate }: NodeMetricCardProps) {
   const node       = useArchitectureStore((s) => s.nodes.find((n) => n.id === nodeId));
   const config     = useArchitectureStore((s) => s.nodeConfigs[nodeId]);
   const metrics    = useSimulationStore((s) => s.nodeMetrics[nodeId]);
@@ -48,7 +49,7 @@ export default function NodeMetricCard({ nodeId }: NodeMetricCardProps) {
   const rpsOut    = metrics?.rpsOut    ?? 0;
   const latencyMs = metrics?.latencyMs ?? 0;
   const p99       = metrics?.p99LatencyMs ?? 0;
-  const errorRate = metrics?.errorRate ?? 0;
+  const errorRate = overrideErrorRate ?? metrics?.errorRate ?? 0;
   const failed    = metrics?.failed    ?? false;
   const detail    = metrics?.detail;
 
