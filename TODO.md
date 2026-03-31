@@ -23,6 +23,7 @@ This file reflects the current codebase state. It replaces the older component l
 - [x] Load Balancer
 - [x] Rate Limiter
 - [x] Service Mesh
+- [x] API Gateway
 
 ### Compute and async processing
 
@@ -50,7 +51,6 @@ This file reflects the current codebase state. It replaces the older component l
 
 ## High Priority Next Work
 
-- [ ] Add API Gateway as a first-class entry-point node with auth, routing, and request validation behavior.
 - [ ] Add Firewall / WAF to model filtering, inspection latency, and blocked traffic.
 - [ ] Add NAT Gateway to model outbound egress bottlenecks for private workloads.
 - [ ] Expand automated SimulationEngine coverage for overload, failover, routing, and stateful component behavior.

@@ -104,7 +104,9 @@ Every component has a **scope** (`ComponentScope = 'global' | 'regional' | 'zona
 | `cdn` | CDN Edge | ◎ | `#00ddff` | global | Content delivery network |
 | `traffic_generator` | Traffic Generator | ↯ | `#f43f5e` | global | Injects configurable RPS |
 | `comment` | Comment | // | `#f59e0b` | global | Annotation — no simulation effect |
+| `global_accelerator` | Global Accelerator | ⊙ | `#818cf8` | global | Anycast routing across regions with health-aware failover |
 | `load_balancer` | Load Balancer | ⇌ | `#ff55bb` | regional | Distributes traffic across AZs (ALB/NLB) |
+| `api_gateway` | API Gateway | ⊞ | `#3b82f6` | regional | Routes traffic to microservices by path/weight |
 | `cloud_storage` | Cloud Storage | ◫ | `#38bdf8` | regional | Object storage replicated across AZs (S3) |
 | `pubsub` | Pub/Sub | ⊕ | `#fb923c` | regional | Async message bus across AZs (SQS/Kinesis) |
 | `cloud_function` | Cloud Function | ƒ | `#a78bfa` | regional | Serverless compute (Lambda) |
@@ -136,6 +138,7 @@ regionId?: string          // node ID of the region (used for regional component
 
 // Region container
 regionName?: string        // e.g. 'us-east-1'
+regionFailed?: boolean     // force-fail the entire region
 containerWidth?: number    // default 900
 containerHeight?: number   // default 560
 
@@ -153,6 +156,13 @@ bandwidthGbps?: number     // default 100
 algorithm?: 'round_robin' | 'least_conn' | 'ip_hash' | 'random' | 'weighted'
 healthChecks?: boolean     // default true
 maxConnections?: number    // default 100000
+
+// API Gateway
+gatewayRoutes?: Array<{ id: string; path?: string; destNodeId: string; weightPct: number }>
+gatewayAuthEnabled?: boolean      // default false — adds auth overhead to latency
+gatewayAuthOverheadMs?: number    // default 5 ms
+gatewayCacheEnabled?: boolean     // default false — gateway-level response caching
+gatewayCacheHitPct?: number       // 0–100, default 30 (read requests only)
 
 // App Server
 instances?: number         // default 1
@@ -251,6 +261,10 @@ meshRoutes?: Array<{
   weightPct: number       // relative weight (normalized to 100% at tick time)
 }>
 
+// Global Accelerator
+routingPolicy?: 'latency' | 'geo' | 'weighted'
+failoverEnabled?: boolean
+
 // Comment
 commentBody?: string
 ```
@@ -298,7 +312,8 @@ interface NodeMetrics {
 | `kind` | Fields |
 |--------|--------|
 | `cdn` | `cacheHitRate`, `originBypassRps`, `bandwidthGbps` |
-| `load_balancer` | `activeConnections`, `scalingEvent: boolean`, `connectionsPerSecond` |
+| `load_balancer` | `activeConnections`, `scalingEvent: boolean`, `connectionsPerSecond`, `failedTargets`, `availableZones`, `totalZones`, `noZonesAvailable` |
+| `api_gateway` | `activeRoutes`, `routedRps`, `throttledRps`, `cacheHitRate` |
 | `app_server` | `cpuPct`, `memPct`, `activeInstances`, `pendingInstances`, `pendingCountdown`, `warmReserve`, `scalingEvent: 'up-warm'\|'up-cold'\|'down'\|null`, `scaleUpCooldown`, `scaleDownCooldown` |
 | `cache` | `hitRate`, `evictionRate`, `memoryUsedPct` |
 | `database` | `connectionPoolUsed`, `connectionPoolMax`, `queryQueueDepth`, `slowQueryRate` |
@@ -311,6 +326,7 @@ interface NodeMetrics {
 | `worker_pool` | `queueDepth` (stateful), `workerUtilization`, `taskBacklogMs` |
 | `rate_limiter` | `allowedRps`, `throttledRps`, `throttleRate`, `queueDepth` (stateful for queuing algos) |
 | `service_mesh` | `activeConnections`, `mtlsHandshakeRate`, `circuitBroken`, `retryRate` |
+| `global_accelerator` | `activeRegions`, `failedRegions`, `reroutedRps` |
 
 ---
 
@@ -331,10 +347,13 @@ export function runSimulationTick(
 
 1. `buildAdjacency` — downstream/upstream maps + cycle detection via DFS (WHITE/GRAY/BLACK coloring)
 2. `topoSort` — Kahn's BFS; returns nodes in processing order and source node set
-3. Resolve service mesh routing tables → `resolvedEdgeConfigs` (overrides `splitPct` on matched edges; deduplicates by max weight per `destNodeId`)
-4. BFS traversal in topological order computing per-node metrics
-5. Build `nodeZoneIdMap` / `nodeRegionIdMap` from nodeConfigs for cross-zone/region latency
-6. Edge metrics pass: `rps = sourceMetric.rpsOut`, cross-AZ +2 ms, cross-region +75 ms, `isBottleneck = load > 0.9`
+3. **Resolve service mesh routing tables** → `resolvedEdgeConfigs` (overrides `splitPct` on matched edges; deduplicates by max weight per `destNodeId`)
+4. **Resolve API gateway routing tables** → same `resolvedEdgeConfigs` (deduplicates by `destNodeId`; all four unique dest IDs are effective when routing to per-AZ replicas)
+5. **Pre-compute effectively failed regions** — region is failed if `regionFailed=true` OR every AZ in it has `zoneFailed=true`
+6. **Health-aware redistribution** — LB: equal split among healthy targets; GA: zone-count-weighted split
+7. BFS traversal in topological order computing per-node metrics
+8. Build `nodeZoneIdMap` / `nodeRegionIdMap` from nodeConfigs for cross-zone/region latency
+9. Edge metrics pass: `rps = sourceMetric.rpsOut`, cross-AZ +2 ms, cross-region +75 ms, `isBottleneck = load > 0.9`
 
 ### RPS sourcing rules
 
@@ -343,10 +362,11 @@ export function runSimulationTick(
 - Other nodes with no upstream — receive `incomingRps`
 - All other nodes — sum upstream contributions weighted by `splitPct`
 
-### Zone failure injection
+### Zone / region failure injection
 
 Before the `switch (type)` for each node (except `region`, `availability_zone`, `comment`):
-if the node's `zoneId` points to a zone where `zoneFailed === true`, metrics are immediately forced to `{ rpsOut: 0, load: 2, errorRate: 1, failed: true }` and the node is skipped.
+- If the node's `zoneId` → zone has `zoneFailed === true`, metrics forced to `{ rpsOut: 0, load: 2, errorRate: 1, failed: true }`
+- If the node's `regionId` (or its zone's `regionId`) is in the effectively-failed-regions set, same force-fail
 
 ### load / failed / errorRate pattern
 
@@ -381,6 +401,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 |------|---------|
 | CDN | `pops × 25000` (`RPS_PER_POP`) |
 | Load Balancer | `50000` fixed (`LB_RPS_MAX`) |
+| API Gateway | `50000` fixed |
 | App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (used by `computeCapacity`; tick uses `rpsPerInstance` override if set) |
 | Cache | `100000` fixed (`CACHE_RPS_MAX`) |
 | Database | `shards × rpsPerShard + readReplicas × rpsPerShard` |
@@ -394,6 +415,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Traffic Generator | `∞` (pure source) |
 | Rate Limiter | `requestsPerSecond` (placeholder; load overridden in tick) |
 | Service Mesh | `∞` (pass-through; load derived from proxy overhead fraction) |
+| Global Accelerator | `500000` |
 | Region / AZ | `∞` (structural containers) |
 
 ### Base latencies (ms)
@@ -402,6 +424,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 |------|------|----------------|
 | CDN | 5 | — |
 | Load Balancer | 2 | — |
+| API Gateway | 5 | `gatewayAuthOverheadMs` added on top when auth enabled |
 | App Server | 40 | `avgLatencyMs` |
 | Cache | 1 | — |
 | Database | 10 | — |
@@ -415,6 +438,7 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Traffic Generator | 0 | — |
 | Rate Limiter | 1 | — |
 | Service Mesh | 2 | `proxyOverheadMs` |
+| Global Accelerator | 5 | — |
 | Region / AZ | 0 | — |
 
 ---
@@ -425,15 +449,18 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 Cache hit rate = `(cacheablePct/100) × max(0.4, 1 − degradation)` where degradation rises above 80% load. Reads absorbed by hit rate; writes pass through. `rpsOut = non-hit reads + writes − drops`.
 
 ### Load Balancer
-Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at `maxConnections`. Sets `scalingEvent = true` when `load > 0.75`.
+Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at `maxConnections`. Sets `scalingEvent = true` when `load > 0.75`. Health-check redistribution (pre-BFS step 6) routes away from failed downstream nodes; `failedTargets` and `noZonesAvailable` tracked in detail.
+
+### API Gateway
+`cacheHitRate = gatewayCacheHitPct/100` (reads only, when `gatewayCacheEnabled`). `readRpsOut = readRpsIn × (1 − cacheHitRate) × (1 − dropRate)`. `writeRpsOut = writeRpsIn × (1 − dropRate)`. Auth overhead (`gatewayAuthOverheadMs`) added to `latencyMs` when `gatewayAuthEnabled`. `gatewayRoutes` resolved in pre-BFS step 4 — deduplicates by `destNodeId` (max weight wins); weights normalized to 100% and applied as `splitPct` overrides on downstream edges.
 
 ### App Server (static, `autoscalingEnabled = false`)
 `effectiveCap = instances × perInstRps × ioScale`. IO wait from downstream stores added to latency.
 
 `workloadType` changes three things:
-- **IO wait weight** applied before `ioScale`: `cpu_bound=0.1`, `memory_bound=0.35`, `io_bound=1.0`
+- **IO wait weight**: `cpu_bound=0.1`, `memory_bound=0.35`, `io_bound=1.0`
 - **Nominal RPS per instance** (when `rpsPerInstance` not set): `cpu_bound=cpuCores×350`, `memory_bound=min(cpuCores×300, ramGb×100)`, `io_bound=cpuCores×500`
-- **`cpuPct`/`memPct` display**: `cpu_bound` saturates CPU fast; `memory_bound` saturates memory fast; `io_bound` both moderate (threads waiting)
+- **`cpuPct`/`memPct` display**: `cpu_bound` saturates CPU fast; `memory_bound` saturates memory fast; `io_bound` both moderate
 
 ### App Server (autoscaling FSM)
 See "App Server Autoscaling FSM" section below.
@@ -481,8 +508,11 @@ Five algorithms with different burst/queue behaviors:
 ### Service Mesh
 Pass-through proxy layer. Latency = `proxyOverheadMs × 2` (two sidecar hops) + observability overhead (`none=0`, `basic=0.5`, `full=1` ms) + mTLS overhead (~1 ms if enabled). Retries amplify downstream RPS when upstream errors occur (`retryRps += errorRps × meshRetryCount`). Circuit breaker: when error rate exceeds `meshCircuitBreakerThreshold%`, `circuitBroken = true` — traffic is fast-failed. Routing table overrides edge `splitPct` for matched `destNodeId` entries; duplicate dest pairs are resolved by max weight.
 
+### Global Accelerator
+Health-aware proportional routing (pre-BFS step 6). Each downstream region weighted by its active zone count. Failed regions get weight 0. `reroutedRps` tracks traffic shifted away from failed endpoints.
+
 ### Region / Availability Zone
-Structural container nodes — transparent pass-through with no simulation effect (`load=0`, `failed=false`, `rpsOut=rpsIn`). Zone failure is applied **before** processing each resource node: if `nodeConfig.zoneId` points to a zone where `zoneFailed=true`, that resource node is immediately force-failed.
+Structural container nodes — transparent pass-through with no simulation effect (`load=0`, `failed=false`, `rpsOut=rpsIn`). Zone failure applied before processing each resource node. Region failure pre-computed from `regionFailed` flag or all-zones-failed condition.
 
 ---
 
@@ -540,8 +570,8 @@ In the edge metrics pass, the engine builds `nodeZoneIdMap` and `nodeRegionIdMap
 - Source and target in **different zones, same region** → `+2 ms`
 - Source and target in **different regions** → `+75 ms`
 
-### Zone failure
-Set `zoneFailed: true` on an `availability_zone` node's config. On the next tick, all resource nodes whose `zoneId` points to that zone are force-failed (`rpsOut=0, load=2, errorRate=1, failed=true`) before their normal tick logic runs.
+### Zone / region failure
+Set `zoneFailed: true` on an `availability_zone` node's config, or `regionFailed: true` on a `region` node's config. On the next tick, all resource nodes in that failure domain are force-failed.
 
 ---
 
@@ -566,6 +596,9 @@ Set `zoneFailed: true` on an `availability_zone` node's config. On the next tick
 | worker_pool backlog crosses 2000 ms | warn | Queue depth included |
 | app_server scalingEvent changes | k8s | warm/cold/down message |
 | load_balancer scalingEvent fires | k8s | Auto-scale signal |
+| load_balancer failedTargets goes from 0 to >0 | warn | Health check rerouting |
+| load_balancer noZonesAvailable becomes true | error | All zones down |
+| global_accelerator failedRegions goes from 0 to >0 | warn | Failover active |
 
 ---
 
@@ -580,11 +613,11 @@ Set `zoneFailed: true` on an `availability_zone` node's config. On the next tick
 7. Register the node type in `Canvas.tsx` (`nodeTypes` map)
 8. Add the type to `Inspector.tsx` field dispatch switch
 9. Add `case 'your_type':` in `SimulationEngine.ts`:
-   - Set `rpsOut`
-   - Override `load`, `failed`, `errorRate`, `latencyMs` if needed
-   - Set `detail` if the type has a `ComponentDetail` variant
-   - Add cases in `computeCapacity` and `computeBaseLatency`
    - Add to `BASE_LATENCY` record
+   - Add to `computeCapacity` switch
+   - Set `rpsOut`, override `load`, `failed`, `errorRate`, `latencyMs` if needed
+   - Set `detail` if the type has a `ComponentDetail` variant
+   - If it needs pre-BFS routing (like `api_gateway`/`service_mesh`): add a routing resolution block between steps 3 and 5 in the processing order
 10. Thread stateful components by reading `prevNodeMetrics?.detail` and storing state in `detail`
 11. Add event generation in `simulationStore.ts` if the type has component-specific failure events
 12. Add to `COMPONENT_CATEGORY` in `ComponentLibrary.tsx`
@@ -602,7 +635,9 @@ Set `zoneFailed: true` on an `availability_zone` node's config. On the next tick
 - **`p99LatencyMs = latencyMs × 2.5`** — fixed multiplier, computed at end of each node's tick.
 - **Autoscaling scale trigger uses `loadPct`, not `cpuPct`** — `scaleUpCpuPct`/`scaleDownCpuPct` config fields are compared against `dynamicLoad × 100`, not the displayed `cpuPct`. This is intentional so IO-bound workloads scale correctly.
 - **`computeCapacity` vs tick capacity** — `computeCapacity` for `app_server` uses `min(cpuCores, ramGb×0.5) × 300` and ignores `rpsPerInstance`. The tick case uses `rpsPerInstance` if set. These can diverge; the tick value is what actually determines simulation behavior.
+- **API gateway route deduplication** — `gatewayRoutes` deduplicates by `destNodeId` (max weight wins). Multiple routes to the same dest are shadowed in the UI and collapsed in the engine. When routing to per-AZ replicas (e.g. users-a and users-b), each dest ID is unique so all routes are effective.
 - **Service mesh routing deduplication** — `meshRoutes` supports `sourceNodeId` for UI display. The simulation engine deduplicates by `destNodeId` only (max weight wins). The inspector UI marks lower-weight duplicate rules as "SHADOWED".
 - **Region/AZ nodes are not React Flow parent nodes** — zone membership is stored in `nodeConfig.zoneId` / `nodeConfig.regionId`, not via React Flow's `parentNode`. The containers are purely visual; resource nodes are not children in the React Flow sense.
 - **NodeLocationBadge scope** — do not add `NodeLocationBadge` to `RegionNode` or `AvailabilityZoneNode` (they are the containers, not resource nodes).
 - **`scope` field required** — every new `ComponentDefinition` must include a `scope` value. The `NodeLocationField` in `Inspector.tsx` reads it from `COMPONENT_BY_TYPE[type].scope` to decide which picker to show.
+- **Pre-BFS routing resolution order** — service mesh routes are resolved first (step 3), then API gateway routes (step 4, labelled 4.55 in engine comments), then health-aware redistribution (step 5/6). Later steps overwrite earlier `splitPct` values for the same edge. If a service mesh and an API gateway both have edges to the same downstream, the last resolver wins.
