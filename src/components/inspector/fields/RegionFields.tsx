@@ -3,6 +3,7 @@
 import { useArchitectureStore } from '@/store/architectureStore';
 
 const ACCENT = '#c084fc';
+const FAILED_COLOR = '#f87171';
 
 const labelStyle: React.CSSProperties = {
   fontFamily: "'JetBrains Mono', monospace",
@@ -36,6 +37,8 @@ export default function RegionFields({ nodeId }: Props) {
   const config = useArchitectureStore((s) => s.nodeConfigs[nodeId] ?? {});
   const update = useArchitectureStore((s) => s.updateNodeConfig);
 
+  const failed = config.regionFailed ?? false;
+
   return (
     <div>
       <div style={fieldStyle}>
@@ -48,6 +51,59 @@ export default function RegionFields({ nodeId }: Props) {
           style={inputStyle}
           spellCheck={false}
         />
+      </div>
+
+      {/* Region Failed toggle */}
+      <div
+        style={{
+          marginBottom: '14px',
+          padding: '10px 12px',
+          background: failed ? `${FAILED_COLOR}10` : 'var(--bg-base)',
+          border: `1px solid ${failed ? FAILED_COLOR : 'var(--border)'}`,
+          borderRadius: '6px',
+          transition: 'background 0.2s, border-color 0.2s',
+        }}
+      >
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={failed}
+            onChange={(e) => update(nodeId, { regionFailed: e.target.checked })}
+            style={{ width: 14, height: 14, accentColor: FAILED_COLOR, cursor: 'pointer' }}
+          />
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '11px',
+              fontWeight: 600,
+              color: failed ? FAILED_COLOR : 'var(--text)',
+              letterSpacing: '0.02em',
+            }}
+          >
+            {failed ? 'Region FAILED' : 'Simulate Region Failure'}
+          </span>
+        </label>
+        {failed && (
+          <p
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '9px',
+              color: FAILED_COLOR,
+              margin: '6px 0 0 24px',
+              lineHeight: 1.6,
+              opacity: 0.8,
+            }}
+          >
+            All resources in this region (and its zones) are forced to errorRate=100% and rpsOut=0.
+          </p>
+        )}
       </div>
 
       <div style={fieldStyle}>

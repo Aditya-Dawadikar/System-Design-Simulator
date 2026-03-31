@@ -5,10 +5,9 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import type { NodeStatus } from '@/types';
-import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
-const COLOR = '#ff55bb';
-const ICON = '⇌';
+const COLOR = '#818cf8';
+const ICON = '⊙';
 
 function getStatusFromLoad(load: number, failed: boolean): NodeStatus {
   if (failed) return 'failed';
@@ -35,12 +34,10 @@ const STATUS_LABELS: Record<NodeStatus, string> = {
   idle: 'IDLE',
 };
 
-const ALGO_SHORT: Record<string, string> = {
-  round_robin: 'RR',
-  least_conn: 'LC',
-  ip_hash: 'IP',
-  random: 'RND',
-  weighted: 'WGT',
+const POLICY_SHORT: Record<string, string> = {
+  latency: 'LATENCY',
+  geo: 'GEO',
+  weighted: 'WEIGHTED',
 };
 
 function getBorderColor(status: NodeStatus): string {
@@ -48,14 +45,14 @@ function getBorderColor(status: NodeStatus): string {
   return STATUS_COLORS[status];
 }
 
-export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
+export default memo(function GlobalAcceleratorNode({ id, selected }: NodeProps) {
   const config = useArchitectureStore((s) => s.nodeConfigs[id]);
   const running = useSimulationStore((s) => s.running);
   const metrics = useSimulationStore((s) => s.nodeMetrics[id]);
 
-  const label = config?.label ?? 'Load Balancer';
-  const algorithm = config?.algorithm ?? 'round_robin';
-  const maxConnections = config?.maxConnections ?? 100000;
+  const label = config?.label ?? 'Global Accelerator';
+  const policy = config?.routingPolicy ?? 'latency';
+  const failoverEnabled = config?.failoverEnabled !== false;
 
   const status = running && metrics
     ? getStatusFromLoad(metrics.load, metrics.failed)
@@ -63,24 +60,21 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
 
   const borderColor = getBorderColor(status);
   const statusColor = STATUS_COLORS[status];
-  const detail = metrics?.detail?.kind === 'load_balancer' ? metrics.detail : null;
   const boxShadow = selected
     ? `0 0 0 2px ${COLOR}44, 0 0 20px ${COLOR}33`
     : status !== 'idle'
     ? `0 0 12px ${borderColor}22`
     : 'none';
 
-  const maxConnStr =
-    maxConnections >= 1000
-      ? `${(maxConnections / 1000).toFixed(0)}k`
-      : String(maxConnections);
+  const detail = metrics?.detail?.kind === 'global_accelerator' ? metrics.detail : null;
+  const hasFailure = detail ? detail.failedRegions > 0 : false;
 
   return (
     <div
       style={{
         width: 208,
         background: 'var(--bg-panel)',
-        border: `1.5px solid ${borderColor}`,
+        border: `1.5px solid ${hasFailure ? 'var(--accent-orange)' : borderColor}`,
         borderRadius: 8,
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
@@ -139,7 +133,7 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
       {/* Config summary */}
       <div style={{ padding: '8px 12px', borderBottom: running && metrics ? '1px solid var(--border)' : 'none' }}>
         <span style={{ color: 'var(--text-dim)' }}>
-          {ALGO_SHORT[algorithm] ?? algorithm} · {maxConnStr} max conn
+          {POLICY_SHORT[policy] ?? policy} · {failoverEnabled ? 'Failover ON' : 'Failover OFF'}
         </span>
       </div>
 
@@ -162,24 +156,6 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
               </div>
             </div>
             <div>
-              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LOAD</span>
-              <div style={{ fontWeight: 600, fontSize: 12, color: statusColor }}>
-                {Math.round(metrics.load * 100)}%
-              </div>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>ERR%</span>
-              <div
-                style={{
-                  fontWeight: 600,
-                  fontSize: 12,
-                  color: metrics.errorRate > 0 ? 'var(--accent-red)' : 'var(--text-dim)',
-                }}
-              >
-                {(metrics.errorRate * 100).toFixed(1)}%
-              </div>
-            </div>
-            <div>
               <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>RPS OUT</span>
               <div style={{ color: 'var(--text)', fontWeight: 600, fontSize: 12 }}>
                 {metrics.rpsOut >= 1000
@@ -187,50 +163,42 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
                   : metrics.rpsOut.toFixed(0)}
               </div>
             </div>
+            {detail && (
+              <>
+                <div>
+                  <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>ACTIVE</span>
+                  <div style={{ color: 'var(--accent-green)', fontWeight: 600, fontSize: 12 }}>
+                    {detail.activeRegions} endpoint{detail.activeRegions !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>FAILED</span>
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: 12,
+                      color: detail.failedRegions > 0 ? 'var(--accent-red)' : 'var(--text-dim)',
+                    }}
+                  >
+                    {detail.failedRegions} endpoint{detail.failedRegions !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                {detail.reroutedRps > 0 && (
+                  <div style={{ gridColumn: '1 / -1', marginTop: 2 }}>
+                    <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>REROUTED</span>
+                    <div style={{ color: 'var(--accent-orange)', fontWeight: 600, fontSize: 12 }}>
+                      {detail.reroutedRps >= 1000
+                        ? `${(detail.reroutedRps / 1000).toFixed(1)}k`
+                        : detail.reroutedRps.toFixed(0)} rps
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-          {/* Health-check rerouting indicator */}
-          {detail?.noZonesAvailable && (
-            <div
-              style={{
-                marginTop: 6,
-                padding: '3px 7px',
-                background: 'color-mix(in srgb, var(--accent-red) 12%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--accent-red) 35%, transparent)',
-                borderRadius: 4,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
-              <span style={{ fontSize: 9, color: 'var(--accent-red)' }}>!</span>
-              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--accent-red)', letterSpacing: '0.04em' }}>
-                No zones available for routing
-              </span>
-            </div>
-          )}
-          {detail && !detail.noZonesAvailable && detail.failedTargets > 0 && (
-            <div
-              style={{
-                marginTop: 6,
-                padding: '3px 7px',
-                background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
-                border: '1px solid color-mix(in srgb, var(--accent-orange) 35%, transparent)',
-                borderRadius: 4,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
-              <span style={{ fontSize: 9, color: 'var(--accent-orange)' }}>⚠</span>
-              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--accent-orange)', letterSpacing: '0.04em' }}>
-                {detail.failedTargets} target{detail.failedTargets !== 1 ? 's' : ''} unhealthy — rerouting
-              </span>
-            </div>
-          )}
         </div>
       )}
 
-      <NodeLocationBadge nodeId={id} />
       <Handle
         type="source"
         position={Position.Bottom}

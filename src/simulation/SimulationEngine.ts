@@ -59,6 +59,7 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   service_mesh: 2,       // sidecar proxy overhead; overridden by proxyOverheadMs config
   region: 0,             // structural container — no simulation latency
   availability_zone: 0,  // structural container — no simulation latency
+  global_accelerator: 5, // anycast edge routing overhead
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,10 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
     case 'availability_zone':
       // Annotation / pure-source / structural container nodes — never get overloaded
       return Number.MAX_SAFE_INTEGER;
+
+    case 'global_accelerator':
+      // Cloud-scale anycast network — extremely high capacity
+      return 500000;
 
     case 'rate_limiter':
       // Pre-switch load is overridden in the tick case; return rpsLimit as placeholder
@@ -473,6 +478,66 @@ export function runSimulationTick(
     }
   }
 
+  // ---- 4.6. Health-aware downstream redistribution ----
+  // Applies to: load_balancer (when healthChecks=true) and global_accelerator (when failoverEnabled=true).
+  // For each such node, check previousMetrics for failed downstream endpoints.
+  // Redistribute splitPct evenly among healthy endpoints; zero out failed ones.
+  // This mirrors ALB/NLB target-group health checks and Global Accelerator failover.
+  for (const node of nodes) {
+    const nodeType = getNodeType(node);
+    const cfg = nodeConfigs[node.id] ?? {};
+
+    const isLb = nodeType === 'load_balancer' && (cfg.healthChecks !== false);
+    const isGa = nodeType === 'global_accelerator' && (cfg.failoverEnabled !== false);
+    if (!isLb && !isGa) continue;
+
+    const downstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+      (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+    );
+    if (downstreamIds.length < 2) continue;
+
+    const failedIds = downstreamIds.filter((id) => previousMetrics[id]?.failed === true);
+    const healthyIds = downstreamIds.filter((id) => !(previousMetrics[id]?.failed));
+
+    // Only reroute if there is at least one failure and one healthy endpoint
+    if (failedIds.length === 0 || healthyIds.length === 0) continue;
+
+    const healthyPct = 100 / healthyIds.length;
+    for (const dsId of downstreamIds) {
+      const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
+      if (!eid) continue;
+      resolvedEdgeConfigs[eid] = {
+        ...(edgeConfigs[eid] ?? {
+          protocol: 'REST', timeoutMs: 5000, retryCount: 2,
+          circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0,
+        }),
+        splitPct: healthyIds.includes(dsId) ? healthyPct : 0,
+      };
+    }
+  }
+
+  // ---- 4.7. Pre-compute effectively failed regions ----
+  // A region is effectively failed if:
+  //   a) its regionFailed config flag is explicitly set, OR
+  //   b) every availability_zone belonging to it has zoneFailed=true
+  // This allows the simulation to auto-fail a region when all its AZs go down,
+  // and auto-recover when at least one AZ comes back.
+  const effectivelyFailedRegions = new Set<string>();
+  for (const n of nodes) {
+    if (n.type !== 'region') continue;
+    const rCfg = nodeConfigs[n.id] ?? {};
+    if (rCfg.regionFailed) {
+      effectivelyFailedRegions.add(n.id);
+      continue;
+    }
+    const zonesInRegion = nodes.filter(
+      (z) => z.type === 'availability_zone' && nodeConfigs[z.id]?.regionId === n.id
+    );
+    if (zonesInRegion.length > 0 && zonesInRegion.every((z) => nodeConfigs[z.id]?.zoneFailed)) {
+      effectivelyFailedRegions.add(n.id);
+    }
+  }
+
   // ---- 5. BFS traversal in topological order ----
   const nodeMetrics: Record<string, NodeMetrics> = {};
 
@@ -578,6 +643,32 @@ export function runSimulationTick(
           continue;
         }
       }
+
+      // ---- Region failure: force-fail resources if their region is effectively failed ----
+      // Check direct regionId assignment (regional components)
+      const directRegionId = config.regionId;
+      if (directRegionId && effectivelyFailedRegions.has(directRegionId)) {
+        nodeMetrics[node.id] = {
+          rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
+          errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+        };
+        rpsOutMap.set(node.id, 0);
+        readRatioOutMap.set(node.id, readRatio);
+        continue;
+      }
+      // Check zone → region path (zonal components inside an effectively failed region)
+      if (nodeZoneId) {
+        const zoneRegionId = nodeConfigs[nodeZoneId]?.regionId;
+        if (zoneRegionId && effectivelyFailedRegions.has(zoneRegionId)) {
+          nodeMetrics[node.id] = {
+            rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
+            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+          };
+          rpsOutMap.set(node.id, 0);
+          readRatioOutMap.set(node.id, readRatio);
+          continue;
+        }
+      }
     }
 
     // ---- Per-type tick: rpsOut, readRatioOut, latency penalties, detail ----
@@ -611,7 +702,41 @@ export function runSimulationTick(
         const activeConnections = Math.min(maxConns, Math.round(rpsIn * 0.05));
         // Signals downstream auto-scale when load exceeds 75 %
         const scalingEvent = load > 0.75;
-        detail = { kind: 'load_balancer', activeConnections, scalingEvent, connectionsPerSecond: rpsIn };
+        // Count failed targets and aggregate health by downstream zone for routing status.
+        const lbDownstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+          (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+        );
+        const zoneAvailability = new Map<string, boolean>();
+        let failedTargets = 0;
+
+        for (const targetId of lbDownstreamIds) {
+          const targetConfig = nodeConfigs[targetId];
+          const zoneId = targetConfig?.zoneId;
+          const regionId = targetConfig?.regionId ?? (zoneId ? nodeConfigs[zoneId]?.regionId : undefined);
+          const zoneFailed = zoneId ? nodeConfigs[zoneId]?.zoneFailed === true : false;
+          const regionFailed = regionId ? nodeConfigs[regionId]?.regionFailed === true : false;
+          const targetFailed = zoneFailed || regionFailed || previousMetrics[targetId]?.failed === true;
+
+          if (targetFailed) failedTargets++;
+
+          const zoneKey = zoneId ?? targetId;
+          zoneAvailability.set(zoneKey, (zoneAvailability.get(zoneKey) ?? false) || !targetFailed);
+        }
+
+        const totalZones = zoneAvailability.size;
+        const availableZones = Array.from(zoneAvailability.values()).filter(Boolean).length;
+        const noZonesAvailable = totalZones > 0 && availableZones === 0;
+
+        detail = {
+          kind: 'load_balancer',
+          activeConnections,
+          scalingEvent,
+          connectionsPerSecond: rpsIn,
+          failedTargets,
+          availableZones,
+          totalZones,
+          noZonesAvailable,
+        };
         break;
       }
 
@@ -1065,6 +1190,30 @@ export function runSimulationTick(
         const retryRate = meshRetries > 0 ? Math.min(0.8, downstreamErrorRate * meshRetries) : 0;
 
         detail = { kind: 'service_mesh', activeConnections, mtlsHandshakeRate, circuitBroken, retryRate };
+        break;
+      }
+
+      case 'global_accelerator': {
+        // Anycast global routing layer — check downstream health (previous tick) for failover display.
+        const gaDownstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+          (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+        );
+        const failedDownstream = gaDownstreamIds.filter((id) => previousMetrics[id]?.failed === true);
+        const activeRegions = gaDownstreamIds.length - failedDownstream.length;
+        const failedRegions = failedDownstream.length;
+
+        // Calculate rerouted RPS: traffic that would have gone to failed endpoints
+        let reroutedRps = 0;
+        if (failedRegions > 0 && gaDownstreamIds.length > 0) {
+          const failedFraction = failedRegions / gaDownstreamIds.length;
+          reroutedRps = rpsIn * failedFraction;
+        }
+
+        const dropRate = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        latencyMs = baseLatency + Math.pow(Math.min(load, 2.0), 2) * 50; // minimal queueing
+
+        detail = { kind: 'global_accelerator', activeRegions, failedRegions, reroutedRps };
         break;
       }
 

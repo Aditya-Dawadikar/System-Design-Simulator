@@ -16,7 +16,8 @@ export type ComponentType =
   | 'rate_limiter'
   | 'service_mesh'
   | 'region'
-  | 'availability_zone';
+  | 'availability_zone'
+  | 'global_accelerator';
 
 export type RateLimitAlgorithm =
   | 'token_bucket'
@@ -44,7 +45,7 @@ export type NodeStatus = 'idle' | 'ok' | 'stressed' | 'critical' | 'failed';
 
 export type ComponentDetail =
   | { kind: 'cdn';            cacheHitRate: number; originBypassRps: number; bandwidthGbps: number }
-  | { kind: 'load_balancer';  activeConnections: number; scalingEvent: boolean; connectionsPerSecond: number }
+  | { kind: 'load_balancer';  activeConnections: number; scalingEvent: boolean; connectionsPerSecond: number; failedTargets: number; availableZones: number; totalZones: number; noZonesAvailable: boolean }
   | { kind: 'app_server';
       cpuPct: number;
       memPct: number;
@@ -66,7 +67,8 @@ export type ComponentDetail =
   | { kind: 'cron_job';       overlapCount: number; lastRunDurationMs: number }
   | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number }
   | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number }
-  | { kind: 'service_mesh'; activeConnections: number; mtlsHandshakeRate: number; circuitBroken: boolean; retryRate: number };
+  | { kind: 'service_mesh'; activeConnections: number; mtlsHandshakeRate: number; circuitBroken: boolean; retryRate: number }
+  | { kind: 'global_accelerator'; activeRegions: number; failedRegions: number; reroutedRps: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -167,6 +169,10 @@ export interface NodeConfig {
   regionName?: string;
   zoneName?: string;
   zoneFailed?: boolean;
+  regionFailed?: boolean;
+  // Global Accelerator
+  routingPolicy?: 'latency' | 'geo' | 'weighted';
+  failoverEnabled?: boolean;
   // Zone/Region membership (for resource nodes)
   zoneId?: string;
   regionId?: string;

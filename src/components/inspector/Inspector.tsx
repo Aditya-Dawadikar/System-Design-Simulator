@@ -22,6 +22,7 @@ import RateLimiterFields from './fields/RateLimiterFields';
 import ServiceMeshFields from './fields/ServiceMeshFields';
 import RegionFields from './fields/RegionFields';
 import AvailabilityZoneFields from './fields/AvailabilityZoneFields';
+import GlobalAcceleratorFields from './fields/GlobalAcceleratorFields';
 import EdgeInspector from './fields/EdgeInspector';
 
 function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
@@ -104,6 +105,8 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <RegionFields nodeId={nodeId} />;
     case 'availability_zone':
       return <AvailabilityZoneFields nodeId={nodeId} />;
+    case 'global_accelerator':
+      return <GlobalAcceleratorFields nodeId={nodeId} />;
     default:
       return null;
   }

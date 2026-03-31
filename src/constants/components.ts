@@ -180,6 +180,17 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     defaults: { workerCount: 4, threadCount: 4, taskDurationMs: 500 },
   },
 
+  // ── Global infrastructure ─────────────────────────────────────────────────
+  {
+    type: 'global_accelerator',
+    label: 'Global Accelerator',
+    icon: '⊙',
+    color: '#818cf8',
+    description: 'Global — anycast routing across regions with health-aware failover (AWS Global Accelerator / GCP GLB)',
+    scope: 'global',
+    defaults: { routingPolicy: 'latency', failoverEnabled: true },
+  },
+
   // ── Infrastructure containers ─────────────────────────────────────────────
   {
     type: 'region',

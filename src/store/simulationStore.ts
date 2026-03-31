@@ -141,6 +141,24 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
         const prevScale = pd?.kind === 'load_balancer' ? pd.scalingEvent : false;
         if (d.scalingEvent && !prevScale)
           newEvents.push({ tick: tick + 1, level: 'k8s', message: `${lbl} auto-scale signal — ${Math.round(d.activeConnections).toLocaleString()} active conns`, nodeId: id });
+        const prevFailedTargets = pd?.kind === 'load_balancer' ? pd.failedTargets : 0;
+        const prevNoZonesAvailable = pd?.kind === 'load_balancer' ? pd.noZonesAvailable : false;
+        if (d.noZonesAvailable && !prevNoZonesAvailable) {
+          newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} no zones available for routing`, nodeId: id });
+        } else if (!d.noZonesAvailable && prevNoZonesAvailable) {
+          newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} routing restored — ${d.availableZones}/${d.totalZones} zone(s) available`, nodeId: id });
+        } else if (d.failedTargets > 0 && prevFailedTargets === 0) {
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} health check: ${d.failedTargets} target(s) unhealthy — rerouting to remaining targets`, nodeId: id });
+        } else if (d.failedTargets === 0 && prevFailedTargets > 0) {
+          newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} all targets healthy — traffic balanced`, nodeId: id });
+        }
+      }
+      if (d?.kind === 'global_accelerator') {
+        const prevFailed = pd?.kind === 'global_accelerator' ? pd.failedRegions : 0;
+        if (d.failedRegions > 0 && prevFailed === 0)
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} failover active — ${d.failedRegions} endpoint(s) down, rerouting ${d.reroutedRps.toFixed(0)} rps`, nodeId: id });
+        if (d.failedRegions === 0 && prevFailed > 0)
+          newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} all endpoints healthy — failover cleared`, nodeId: id });
       }
     }
 

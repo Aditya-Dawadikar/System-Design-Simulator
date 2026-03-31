@@ -43,6 +43,7 @@ const COMPONENT_CATEGORY: Record<ComponentDefinition['type'], ComponentCategory>
   cron_job: 'Async',
   region: 'Infra',
   availability_zone: 'Infra',
+  global_accelerator: 'Network',
   comment: 'Other',
 };
 

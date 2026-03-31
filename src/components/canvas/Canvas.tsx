@@ -40,6 +40,7 @@ import RateLimiterNode from './nodes/RateLimiterNode';
 import ServiceMeshNode from './nodes/ServiceMeshNode';
 import RegionNode from './nodes/RegionNode';
 import AvailabilityZoneNode from './nodes/AvailabilityZoneNode';
+import GlobalAcceleratorNode from './nodes/GlobalAcceleratorNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -63,6 +64,7 @@ export const nodeTypes: NodeTypes = {
   service_mesh: ServiceMeshNode,
   region: RegionNode,
   availability_zone: AvailabilityZoneNode,
+  global_accelerator: GlobalAcceleratorNode,
 };
 
 export const edgeTypes: EdgeTypes = {

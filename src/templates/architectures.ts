@@ -463,108 +463,142 @@ function buildServiceMesh(): ArchitectureTemplate {
 
 function buildMultiAzHA(): ArchitectureTemplate {
   // Layout:
-  //   Region (us-east-1) is a large background container.
-  //   AZ-a (us-east-1a) holds the primary app server and primary DB.
-  //   AZ-b (us-east-1b) holds the standby app server and read replica DB.
-  //   Traffic → LB (outside region) → app servers spread across both AZs.
-  //   Primary DB replicates cross-AZ to the replica (+2 ms penalty on that edge).
-  //   Toggle "Simulate Zone Failure" on AZ-a to see half the fleet go dark
-  //   while AZ-b continues serving traffic.
+  //   Global Accelerator sits in front and routes directly to app servers in
+  //   each AZ. When an AZ fails the accelerator detects the unhealthy endpoint
+  //   (previous-tick metrics) and shifts all traffic to the surviving AZ.
+  //
+  //   us-east-1 (region container)
+  //   ├── us-east-1a:  App-a (4 inst) → Cache-a → DB-a (primary)
+  //   └── us-east-1b:  App-b (4 inst) → Cache-b → DB-b (read replica)
+  //
+  //   DB-a replicates cross-AZ to DB-b (+2 ms penalty on that edge).
+  //
+  //   Capacity sizing (N+1 model):
+  //     Each AZ: 4 inst × 600 rps = 2 400 rps capacity
+  //     Normal  (50 / 50 split, 2 000 rps total): ~42 % load — OK
+  //     Failover (one AZ down, 2 000 rps to survivor):  ~83 % load — CRITICAL
+  //
+  //   To simulate:
+  //     1. Start the simulation and observe ~42 % load on both AZs.
+  //     2. Select AZ-a → "Simulate Zone Failure" → ON.
+  //     3. Watch the Global Accelerator reroute 100 % of traffic to AZ-b.
+  //     4. AZ-b climbs to ~83 % (critical) — functioning, but at the limit.
+  //     5. Scale AZ-b app instances up to 6+ to absorb the extra load.
 
   const nodes: Node[] = [
-    // ── Structural containers (z-index set to -2/-1 in Canvas) ───────────
-    makeNode('maz-region', 'region',            180,  10),
-    makeNode('maz-az-a',   'availability_zone', 215,  70),
-    makeNode('maz-az-b',   'availability_zone', 650,  70),
-    // ── Ingress (outside region) ──────────────────────────────────────────
-    makeNode('maz-tgen',   'traffic_generator', -160, 270),
-    makeNode('maz-lb',     'load_balancer',      30,  270),
-    // ── AZ-a resources ────────────────────────────────────────────────────
-    makeNode('maz-app1',   'app_server',         275, 190),
-    makeNode('maz-db-pri', 'database',           275, 390),
-    // ── AZ-b resources ────────────────────────────────────────────────────
-    makeNode('maz-app2',   'app_server',         710, 190),
-    makeNode('maz-db-rep', 'database',           710, 390),
+    // ── Global ingress ────────────────────────────────────────────────────
+    makeNode('maz-tgen', 'traffic_generator',  -200, 330),
+    makeNode('maz-ga',   'global_accelerator',   10, 330),
+    // ── Region container ──────────────────────────────────────────────────
+    makeNode('maz-region', 'region',            230,  60),
+    // ── AZ containers (inside region) ────────────────────────────────────
+    makeNode('maz-az-a', 'availability_zone',   265, 125),
+    makeNode('maz-az-b', 'availability_zone',   720, 125),
+    // ── AZ-a resources ───────────────────────────────────────────────────
+    makeNode('maz-app-a',   'app_server', 300, 220),
+    makeNode('maz-cache-a', 'cache',      300, 390),
+    makeNode('maz-db-a',    'database',   300, 520),
+    // ── AZ-b resources ───────────────────────────────────────────────────
+    makeNode('maz-app-b',   'app_server', 755, 220),
+    makeNode('maz-cache-b', 'cache',      755, 390),
+    makeNode('maz-db-b',    'database',   755, 520),
   ];
 
   const edges: Edge[] = [
-    makeEdge('maz-tgen',   'maz-lb'),
-    makeEdge('maz-lb',     'maz-app1'),      // 50 % to AZ-a
-    makeEdge('maz-lb',     'maz-app2'),      // 50 % to AZ-b
-    makeEdge('maz-app1',   'maz-db-pri'),    // local (same AZ — no penalty)
-    makeEdge('maz-app2',   'maz-db-pri'),    // cross-AZ write (+2 ms)
-    makeEdge('maz-db-pri', 'maz-db-rep'),   // cross-AZ replication (+2 ms)
+    makeEdge('maz-tgen',    'maz-ga'),
+    makeEdge('maz-ga',      'maz-app-a'),     // 50 % to AZ-a
+    makeEdge('maz-ga',      'maz-app-b'),     // 50 % to AZ-b
+    makeEdge('maz-app-a',   'maz-cache-a'),
+    makeEdge('maz-app-a',   'maz-db-a'),
+    makeEdge('maz-app-b',   'maz-cache-b'),
+    makeEdge('maz-app-b',   'maz-db-b'),
+    makeEdge('maz-db-a',    'maz-db-b'),      // cross-AZ replication (+2 ms)
   ];
 
   return {
     nodes,
     edges,
     nodeConfigs: {
-      'maz-region': makeConfig('region', {
-        regionName:      'us-east-1',
-        containerWidth:  900,
-        containerHeight: 560,
-      }),
-      'maz-az-a': makeConfig('availability_zone', {
-        zoneName:        'us-east-1a',
-        regionId:        'maz-region',
-        zoneFailed:      false,
-        containerWidth:  385,
-        containerHeight: 440,
-      }),
-      'maz-az-b': makeConfig('availability_zone', {
-        zoneName:        'us-east-1b',
-        regionId:        'maz-region',
-        zoneFailed:      false,
-        containerWidth:  385,
-        containerHeight: 440,
-      }),
       'maz-tgen': makeConfig('traffic_generator', {
         generatorRps:     2000,
         generatorPattern: 'steady',
         readRatioPct:     70,
       }),
-      'maz-lb': makeConfig('load_balancer', {
-        algorithm:    'round_robin',
-        healthChecks: true,
-        regionId:     'maz-region',   // regional resource — spans both AZs
+      'maz-ga': makeConfig('global_accelerator', {
+        label:           'Global Accelerator',
+        routingPolicy:   'latency',
+        failoverEnabled: true,
       }),
-      'maz-app1': makeConfig('app_server', {
-        label:          'App Server (AZ-a)',
-        instances:      2,
-        rpsPerInstance: 600,
-        workloadType:   'io_bound',
-        zoneId:         'maz-az-a',
+      'maz-region': makeConfig('region', {
+        regionName:      'us-east-1',
+        regionFailed:    false,
+        containerWidth:  970,
+        containerHeight: 590,
       }),
-      'maz-app2': makeConfig('app_server', {
-        label:          'App Server (AZ-b)',
-        instances:      2,
-        rpsPerInstance: 600,
-        workloadType:   'io_bound',
-        zoneId:         'maz-az-b',
+      'maz-az-a': makeConfig('availability_zone', {
+        zoneName:        'us-east-1a',
+        regionId:        'maz-region',
+        zoneFailed:      false,
+        containerWidth:  400,
+        containerHeight: 510,
       }),
-      'maz-db-pri': makeConfig('database', {
-        label:        'Primary DB',
+      'maz-az-b': makeConfig('availability_zone', {
+        zoneName:        'us-east-1b',
+        regionId:        'maz-region',
+        zoneFailed:      false,
+        containerWidth:  400,
+        containerHeight: 510,
+      }),
+      'maz-app-a': makeConfig('app_server', {
+        label:           'App Server (AZ-a)',
+        instances:       4,
+        rpsPerInstance:  600,
+        workloadType:    'io_bound',
+        zoneId:          'maz-az-a',
+      }),
+      'maz-cache-a': makeConfig('cache', {
+        label:           'Cache (AZ-a)',
+        memoryGb:        8,
+        ttlSeconds:      60,
+        evictionPolicy:  'lru',
+        zoneId:          'maz-az-a',
+      }),
+      'maz-db-a': makeConfig('database', {
+        label:        'Primary DB (AZ-a)',
         engine:       'PostgreSQL',
         readReplicas: 0,
         shards:       1,
-        rpsPerShard:  1200,
+        rpsPerShard:  1500,
         zoneId:       'maz-az-a',
       }),
-      'maz-db-rep': makeConfig('database', {
-        label:        'Read Replica',
+      'maz-app-b': makeConfig('app_server', {
+        label:           'App Server (AZ-b)',
+        instances:       4,
+        rpsPerInstance:  600,
+        workloadType:    'io_bound',
+        zoneId:          'maz-az-b',
+      }),
+      'maz-cache-b': makeConfig('cache', {
+        label:           'Cache (AZ-b)',
+        memoryGb:        8,
+        ttlSeconds:      60,
+        evictionPolicy:  'lru',
+        zoneId:          'maz-az-b',
+      }),
+      'maz-db-b': makeConfig('database', {
+        label:        'Read Replica (AZ-b)',
         engine:       'PostgreSQL',
         readReplicas: 0,
         shards:       1,
-        rpsPerShard:  800,
+        rpsPerShard:  1500,
         zoneId:       'maz-az-b',
       }),
     },
     edgeConfigs: {
       ...edgeConfigs(edges),
-      // LB splits 50 / 50 across both AZs
-      'maz-lb->maz-app1': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'maz-lb->maz-app2': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      // Global Accelerator splits 50 / 50 under normal conditions
+      'maz-ga->maz-app-a': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'maz-ga->maz-app-b': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
     },
   };
 }
@@ -575,41 +609,77 @@ function buildMultiAzHA(): ArchitectureTemplate {
 
 function buildMultiRegion(): ArchitectureTemplate {
   // Layout:
-  //   Global CDN fans out to two independent regional stacks.
-  //   us-east-1: LB → App Servers → Primary DB (in AZ-a)
-  //   us-west-2: LB → App Servers → Replica DB  (in AZ-a)
-  //   The DB replication edge crosses regions → +75 ms penalty on that wire.
-  //   Each region is self-contained — simulate a regional outage by failing
-  //   all AZs in one region and observing the other region absorb traffic.
+  //   Global Accelerator (with health-aware failover) sits in front and
+  //   distributes traffic 50/50 across two independent regional stacks.
+  //   Each region runs two AZs with a regional LB, app servers, cache,
+  //   and database. Cross-region DB replication carries a 75 ms penalty.
+  //
+  //   Traffic → CDN → Global Accelerator
+  //     ├── us-east-1: LB-east → App-a + App-b → Cache → DB-east (primary)
+  //     └── us-west-2: LB-west → App-a + App-b → Cache → DB-west (replica)
+  //   DB-east  → DB-west  (cross-region async replication, +75 ms)
+  //
+  //   Capacity sizing (active-active N-1 model):
+  //     Each region: 2 AZs × 4 inst × 600 rps = 4 800 rps
+  //     Normal  (3 000 rps total, 50/50): ~31 % load per region — OK
+  //     Failover (one region down, 3 000 rps to survivor): ~63 % — STRESSED
+  //
+  //   To simulate zone failure (intra-region):
+  //     Select AZ-east-a → "Simulate Zone Failure" → ON.
+  //     LB-east routes only to App-east-b; east region absorbs at ~62 %.
+  //
+  //   To simulate region failure (cross-region failover):
+  //     Select us-east-1 → "Simulate Region Failure" → ON.
+  //     Global Accelerator detects LB-east is down and shifts 100 % of
+  //     traffic to us-west-2. West climbs to ~63 % — healthy under load.
+  //     Turn off the failure to watch traffic balance back to 50/50.
 
   const nodes: Node[] = [
-    // ── Global ingress (outside all regions) ─────────────────────────────
-    makeNode('mr-tgen', 'traffic_generator',  610,  -90),
-    makeNode('mr-cdn',  'cdn',                610,   80),
+    // ── Global ingress ────────────────────────────────────────────────────
+    makeNode('mr-tgen', 'traffic_generator',  640, -140),
+    makeNode('mr-cdn',  'cdn',                640,  -20),
+    makeNode('mr-ga',   'global_accelerator', 640,  110),
     // ── us-east-1 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-east',  'region',            50,  200),
-    makeNode('mr-az-east',   'availability_zone',  90,  265),
-    makeNode('mr-lb-east',   'load_balancer',     120,  350),
-    makeNode('mr-app-east',  'app_server',         370,  350),
-    makeNode('mr-db-east',   'database',           370,  500),
+    makeNode('mr-reg-east',    'region',            50,  240),
+    makeNode('mr-az-east-a',   'availability_zone', 85,  310),
+    makeNode('mr-az-east-b',   'availability_zone', 390, 310),
+    makeNode('mr-lb-east',     'load_balancer',     315, 280),
+    makeNode('mr-app-east-a',  'app_server',        120, 390),
+    makeNode('mr-app-east-b',  'app_server',        425, 390),
+    makeNode('mr-cache-east',  'cache',             265, 540),
+    makeNode('mr-db-east',     'database',          265, 660),
     // ── us-west-2 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-west',  'region',            760,  200),
-    makeNode('mr-az-west',   'availability_zone', 800,  265),
-    makeNode('mr-lb-west',   'load_balancer',     830,  350),
-    makeNode('mr-app-west',  'app_server',        1080,  350),
-    makeNode('mr-db-west',   'database',          1080,  500),
+    makeNode('mr-reg-west',    'region',            780, 240),
+    makeNode('mr-az-west-a',   'availability_zone', 815, 310),
+    makeNode('mr-az-west-b',   'availability_zone', 1120, 310),
+    makeNode('mr-lb-west',     'load_balancer',     1045, 280),
+    makeNode('mr-app-west-a',  'app_server',        850, 390),
+    makeNode('mr-app-west-b',  'app_server',        1155, 390),
+    makeNode('mr-cache-west',  'cache',             995, 540),
+    makeNode('mr-db-west',     'database',          995, 660),
   ];
 
   const edges: Edge[] = [
-    makeEdge('mr-tgen',     'mr-cdn'),
-    makeEdge('mr-cdn',      'mr-lb-east'),    // 50 % to east
-    makeEdge('mr-cdn',      'mr-lb-west'),    // 50 % to west
-    makeEdge('mr-lb-east',  'mr-app-east'),
-    makeEdge('mr-lb-west',  'mr-app-west'),
-    makeEdge('mr-app-east', 'mr-db-east'),
-    makeEdge('mr-app-west', 'mr-db-west'),
+    makeEdge('mr-tgen',        'mr-cdn'),
+    makeEdge('mr-cdn',         'mr-ga'),
+    makeEdge('mr-ga',          'mr-lb-east'),       // 50 % to east
+    makeEdge('mr-ga',          'mr-lb-west'),       // 50 % to west
+    // East internal
+    makeEdge('mr-lb-east',     'mr-app-east-a'),    // 50 % to AZ-a
+    makeEdge('mr-lb-east',     'mr-app-east-b'),    // 50 % to AZ-b
+    makeEdge('mr-app-east-a',  'mr-cache-east'),
+    makeEdge('mr-app-east-a',  'mr-db-east'),
+    makeEdge('mr-app-east-b',  'mr-cache-east'),
+    makeEdge('mr-app-east-b',  'mr-db-east'),
+    // West internal
+    makeEdge('mr-lb-west',     'mr-app-west-a'),    // 50 % to AZ-a
+    makeEdge('mr-lb-west',     'mr-app-west-b'),    // 50 % to AZ-b
+    makeEdge('mr-app-west-a',  'mr-cache-west'),
+    makeEdge('mr-app-west-a',  'mr-db-west'),
+    makeEdge('mr-app-west-b',  'mr-cache-west'),
+    makeEdge('mr-app-west-b',  'mr-db-west'),
     // Cross-region DB replication (+75 ms)
-    makeEdge('mr-db-east',  'mr-db-west'),
+    makeEdge('mr-db-east', 'mr-db-west'),
   ];
 
   return {
@@ -617,39 +687,67 @@ function buildMultiRegion(): ArchitectureTemplate {
     edges,
     nodeConfigs: {
       'mr-tgen': makeConfig('traffic_generator', {
-        generatorRps:     4000,
+        generatorRps:     3000,
         generatorPattern: 'wave',
         readRatioPct:     65,
       }),
       'mr-cdn': makeConfig('cdn', {
-        pops:         6,
-        cacheablePct: 55,
+        pops:         8,
+        cacheablePct: 50,
+        bandwidthGbps: 200,
+      }),
+      'mr-ga': makeConfig('global_accelerator', {
+        label:           'Global Accelerator',
+        routingPolicy:   'latency',
+        failoverEnabled: true,
       }),
       // ── East region ──────────────────────────────────────────────────────
       'mr-reg-east': makeConfig('region', {
         regionName:      'us-east-1',
-        containerWidth:  640,
-        containerHeight: 440,
+        regionFailed:    false,
+        containerWidth:  700,
+        containerHeight: 550,
       }),
-      'mr-az-east': makeConfig('availability_zone', {
+      'mr-az-east-a': makeConfig('availability_zone', {
         zoneName:        'us-east-1a',
         regionId:        'mr-reg-east',
         zoneFailed:      false,
-        containerWidth:  580,
-        containerHeight: 340,
+        containerWidth:  280,
+        containerHeight: 420,
+      }),
+      'mr-az-east-b': makeConfig('availability_zone', {
+        zoneName:        'us-east-1b',
+        regionId:        'mr-reg-east',
+        zoneFailed:      false,
+        containerWidth:  280,
+        containerHeight: 420,
       }),
       'mr-lb-east': makeConfig('load_balancer', {
-        label:        'LB (East)',
+        label:        'LB (us-east-1)',
         algorithm:    'least_conn',
         healthChecks: true,
-        regionId:     'mr-reg-east',  // regional resource — remove zoneId
+        regionId:     'mr-reg-east',
       }),
-      'mr-app-east': makeConfig('app_server', {
-        label:          'App (East)',
-        instances:      3,
+      'mr-app-east-a': makeConfig('app_server', {
+        label:          'App (east-1a)',
+        instances:      4,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
-        zoneId:         'mr-az-east',
+        zoneId:         'mr-az-east-a',
+      }),
+      'mr-app-east-b': makeConfig('app_server', {
+        label:          'App (east-1b)',
+        instances:      4,
+        rpsPerInstance: 600,
+        workloadType:   'io_bound',
+        zoneId:         'mr-az-east-b',
+      }),
+      'mr-cache-east': makeConfig('cache', {
+        label:          'Cache (East)',
+        memoryGb:       16,
+        ttlSeconds:     90,
+        evictionPolicy: 'lru',
+        regionId:       'mr-reg-east',
       }),
       'mr-db-east': makeConfig('database', {
         label:        'Primary DB (East)',
@@ -657,33 +755,55 @@ function buildMultiRegion(): ArchitectureTemplate {
         readReplicas: 1,
         shards:       2,
         rpsPerShard:  1000,
-        zoneId:       'mr-az-east',
+        regionId:     'mr-reg-east',
       }),
       // ── West region ──────────────────────────────────────────────────────
       'mr-reg-west': makeConfig('region', {
         regionName:      'us-west-2',
-        containerWidth:  640,
-        containerHeight: 440,
+        regionFailed:    false,
+        containerWidth:  700,
+        containerHeight: 550,
       }),
-      'mr-az-west': makeConfig('availability_zone', {
+      'mr-az-west-a': makeConfig('availability_zone', {
         zoneName:        'us-west-2a',
         regionId:        'mr-reg-west',
         zoneFailed:      false,
-        containerWidth:  580,
-        containerHeight: 340,
+        containerWidth:  280,
+        containerHeight: 420,
+      }),
+      'mr-az-west-b': makeConfig('availability_zone', {
+        zoneName:        'us-west-2b',
+        regionId:        'mr-reg-west',
+        zoneFailed:      false,
+        containerWidth:  280,
+        containerHeight: 420,
       }),
       'mr-lb-west': makeConfig('load_balancer', {
-        label:        'LB (West)',
+        label:        'LB (us-west-2)',
         algorithm:    'least_conn',
         healthChecks: true,
-        regionId:     'mr-reg-west',  // regional resource — remove zoneId
+        regionId:     'mr-reg-west',
       }),
-      'mr-app-west': makeConfig('app_server', {
-        label:          'App (West)',
-        instances:      3,
+      'mr-app-west-a': makeConfig('app_server', {
+        label:          'App (west-2a)',
+        instances:      4,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
-        zoneId:         'mr-az-west',
+        zoneId:         'mr-az-west-a',
+      }),
+      'mr-app-west-b': makeConfig('app_server', {
+        label:          'App (west-2b)',
+        instances:      4,
+        rpsPerInstance: 600,
+        workloadType:   'io_bound',
+        zoneId:         'mr-az-west-b',
+      }),
+      'mr-cache-west': makeConfig('cache', {
+        label:          'Cache (West)',
+        memoryGb:       16,
+        ttlSeconds:     90,
+        evictionPolicy: 'lru',
+        regionId:       'mr-reg-west',
       }),
       'mr-db-west': makeConfig('database', {
         label:        'Replica DB (West)',
@@ -691,14 +811,19 @@ function buildMultiRegion(): ArchitectureTemplate {
         readReplicas: 1,
         shards:       2,
         rpsPerShard:  1000,
-        zoneId:       'mr-az-west',
+        regionId:     'mr-reg-west',
       }),
     },
     edgeConfigs: {
       ...edgeConfigs(edges),
-      // CDN fans 50 / 50 to each region
-      'mr-cdn->mr-lb-east': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-cdn->mr-lb-west': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      // Global Accelerator: 50 / 50 split across regions (failover overrides this)
+      'mr-ga->mr-lb-east':       { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-ga->mr-lb-west':       { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      // Each regional LB: 50 / 50 across its two AZs
+      'mr-lb-east->mr-app-east-a': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-lb-east->mr-app-east-b': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-lb-west->mr-app-west-a': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-lb-west->mr-app-west-b': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
     },
   };
 }
@@ -783,17 +908,17 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
   {
     id: 'multi-az-ha',
     name: 'Multi-AZ High Availability',
-    description: 'Two availability zones in us-east-1 — each holding an app server and database. Cross-AZ writes and replication incur a 2 ms penalty. Toggle "Simulate Zone Failure" on AZ-a to watch the surviving zone absorb all traffic.',
+    description: 'Global Accelerator routes 50/50 across two AZs in us-east-1. Each AZ has 4 app-server instances (2 400 rps capacity) so the survivor can absorb full traffic at ~83 % load. Toggle "Simulate Zone Failure" on AZ-a to watch the accelerator reroute in real time.',
     difficulty: 'intermediate',
-    tags: ['Availability Zone', 'Region', 'HA', 'Zone Failure'],
+    tags: ['Global Accelerator', 'Availability Zone', 'Region', 'HA', 'Zone Failure', 'Failover'],
     template: buildMultiAzHA(),
   },
   {
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
-    description: 'CDN fans traffic 50/50 to us-east-1 and us-west-2. Each region runs an independent stack. The cross-region DB replication edge carries a 75 ms latency penalty. Fail an AZ to watch the CDN keep routing to the healthy region.',
+    description: 'CDN → Global Accelerator fans traffic 50/50 to us-east-1 and us-west-2, each with two AZs and a full app stack. Toggle "Simulate Region Failure" on us-east-1 to watch the accelerator shift all traffic to us-west-2. Toggle "Simulate Zone Failure" within a region to test intra-region resilience.',
     difficulty: 'advanced',
-    tags: ['Region', 'Availability Zone', 'CDN', 'Replication', 'Cross-Region'],
+    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'Replication', 'Cross-Region', 'Failover'],
     template: buildMultiRegion(),
   },
 ];
