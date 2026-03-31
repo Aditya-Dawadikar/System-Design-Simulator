@@ -478,50 +478,11 @@ export function runSimulationTick(
     }
   }
 
-  // ---- 4.6. Health-aware downstream redistribution ----
-  // Applies to: load_balancer (when healthChecks=true) and global_accelerator (when failoverEnabled=true).
-  // For each such node, check previousMetrics for failed downstream endpoints.
-  // Redistribute splitPct evenly among healthy endpoints; zero out failed ones.
-  // This mirrors ALB/NLB target-group health checks and Global Accelerator failover.
-  for (const node of nodes) {
-    const nodeType = getNodeType(node);
-    const cfg = nodeConfigs[node.id] ?? {};
-
-    const isLb = nodeType === 'load_balancer' && (cfg.healthChecks !== false);
-    const isGa = nodeType === 'global_accelerator' && (cfg.failoverEnabled !== false);
-    if (!isLb && !isGa) continue;
-
-    const downstreamIds = (adj.downstream.get(node.id) ?? []).filter(
-      (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
-    );
-    if (downstreamIds.length < 2) continue;
-
-    const failedIds = downstreamIds.filter((id) => previousMetrics[id]?.failed === true);
-    const healthyIds = downstreamIds.filter((id) => !(previousMetrics[id]?.failed));
-
-    // Only reroute if there is at least one failure and one healthy endpoint
-    if (failedIds.length === 0 || healthyIds.length === 0) continue;
-
-    const healthyPct = 100 / healthyIds.length;
-    for (const dsId of downstreamIds) {
-      const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
-      if (!eid) continue;
-      resolvedEdgeConfigs[eid] = {
-        ...(edgeConfigs[eid] ?? {
-          protocol: 'REST', timeoutMs: 5000, retryCount: 2,
-          circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0,
-        }),
-        splitPct: healthyIds.includes(dsId) ? healthyPct : 0,
-      };
-    }
-  }
-
-  // ---- 4.7. Pre-compute effectively failed regions ----
+  // ---- 4.6. Pre-compute effectively failed regions ----
+  // Moved before health-aware redistribution so GA/LB can react to current-tick failures immediately.
   // A region is effectively failed if:
   //   a) its regionFailed config flag is explicitly set, OR
   //   b) every availability_zone belonging to it has zoneFailed=true
-  // This allows the simulation to auto-fail a region when all its AZs go down,
-  // and auto-recover when at least one AZ comes back.
   const effectivelyFailedRegions = new Set<string>();
   for (const n of nodes) {
     if (n.type !== 'region') continue;
@@ -535,6 +496,112 @@ export function runSimulationTick(
     );
     if (zonesInRegion.length > 0 && zonesInRegion.every((z) => nodeConfigs[z.id]?.zoneFailed)) {
       effectivelyFailedRegions.add(n.id);
+    }
+  }
+
+  // Helper: check if a downstream node is currently failed (region/zone config or previous tick)
+  function isDownstreamFailed(id: string): boolean {
+    if (previousMetrics[id]?.failed === true) return true;
+    const dsCfg = nodeConfigs[id] ?? {};
+    const dsRegionId = dsCfg.regionId;
+    if (dsRegionId && effectivelyFailedRegions.has(dsRegionId)) return true;
+    const dsZoneId = dsCfg.zoneId;
+    if (dsZoneId) {
+      if (nodeConfigs[dsZoneId]?.zoneFailed) return true;
+      const zoneRegionId = nodeConfigs[dsZoneId]?.regionId;
+      if (zoneRegionId && effectivelyFailedRegions.has(zoneRegionId)) return true;
+    }
+    const dsNode = nodes.find((n) => n.id === id);
+    if (dsNode?.type === 'region' && effectivelyFailedRegions.has(id)) return true;
+    return false;
+  }
+
+  // Helper: active zone count for a downstream node's region (used for GA proportional routing).
+  // Returns the number of non-failed zones in the region the downstream belongs to.
+  // Falls back to 1 if no region/zone info is available (treat as fully healthy).
+  function getActiveZoneWeight(id: string): number {
+    const dsCfg = nodeConfigs[id] ?? {};
+    const dsNode = nodes.find((n) => n.id === id);
+
+    let regionId: string | undefined;
+    if (dsNode?.type === 'region') {
+      regionId = id;
+    } else {
+      regionId = dsCfg.regionId;
+      if (!regionId && dsCfg.zoneId) {
+        regionId = nodeConfigs[dsCfg.zoneId]?.regionId;
+      }
+    }
+
+    if (!regionId) return 1;
+
+    const zonesInRegion = nodes.filter(
+      (z) => z.type === 'availability_zone' && nodeConfigs[z.id]?.regionId === regionId
+    );
+    if (zonesInRegion.length === 0) return 1; // No zones defined — treat as fully healthy
+
+    return zonesInRegion.filter((z) => !nodeConfigs[z.id]?.zoneFailed).length;
+  }
+
+  // ---- 4.7. Health-aware downstream redistribution ----
+  // LB: equal split among healthy targets (mirrors ALB/NLB target-group health checks).
+  // GA: zone-weighted split — each downstream is weighted by active zone count in its region,
+  //     so a partially-degraded region receives proportionally less traffic.
+  for (const node of nodes) {
+    const nodeType = getNodeType(node);
+    const cfg = nodeConfigs[node.id] ?? {};
+
+    const isLb = nodeType === 'load_balancer' && (cfg.healthChecks !== false);
+    const isGa = nodeType === 'global_accelerator' && (cfg.failoverEnabled !== false);
+    if (!isLb && !isGa) continue;
+
+    const downstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+      (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+    );
+    if (downstreamIds.length < 2) continue;
+
+    if (isGa) {
+      // Proportional routing: weight each downstream by active zone count.
+      // Failed downstreams get weight 0 (no traffic).
+      const weightMap = new Map<string, number>();
+      let totalWeight = 0;
+      for (const dsId of downstreamIds) {
+        const w = isDownstreamFailed(dsId) ? 0 : getActiveZoneWeight(dsId);
+        weightMap.set(dsId, w);
+        totalWeight += w;
+      }
+      if (totalWeight === 0) continue; // All endpoints failed — leave splits unchanged
+
+      for (const dsId of downstreamIds) {
+        const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
+        if (!eid) continue;
+        const w = weightMap.get(dsId) ?? 0;
+        resolvedEdgeConfigs[eid] = {
+          ...(edgeConfigs[eid] ?? {
+            protocol: 'REST', timeoutMs: 5000, retryCount: 2,
+            circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0,
+          }),
+          splitPct: (w / totalWeight) * 100,
+        };
+      }
+    } else {
+      // LB: equal split among healthy targets; zero out failed ones.
+      const failedIds = downstreamIds.filter((id) => isDownstreamFailed(id));
+      const healthyIds = downstreamIds.filter((id) => !isDownstreamFailed(id));
+      if (failedIds.length === 0 || healthyIds.length === 0) continue;
+
+      const healthyPct = 100 / healthyIds.length;
+      for (const dsId of downstreamIds) {
+        const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
+        if (!eid) continue;
+        resolvedEdgeConfigs[eid] = {
+          ...(edgeConfigs[eid] ?? {
+            protocol: 'REST', timeoutMs: 5000, retryCount: 2,
+            circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0,
+          }),
+          splitPct: healthyIds.includes(dsId) ? healthyPct : 0,
+        };
+      }
     }
   }
 
@@ -1194,19 +1261,25 @@ export function runSimulationTick(
       }
 
       case 'global_accelerator': {
-        // Anycast global routing layer — check downstream health (previous tick) for failover display.
+        // Anycast global routing layer — check downstream health for failover display.
         const gaDownstreamIds = (adj.downstream.get(node.id) ?? []).filter(
           (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
         );
-        const failedDownstream = gaDownstreamIds.filter((id) => previousMetrics[id]?.failed === true);
+        const failedDownstream = gaDownstreamIds.filter((id) => isDownstreamFailed(id));
         const activeRegions = gaDownstreamIds.length - failedDownstream.length;
         const failedRegions = failedDownstream.length;
 
-        // Calculate rerouted RPS: traffic that would have gone to failed endpoints
+        // Rerouted RPS: zone-weighted fraction that shifted away from failed endpoints.
         let reroutedRps = 0;
         if (failedRegions > 0 && gaDownstreamIds.length > 0) {
-          const failedFraction = failedRegions / gaDownstreamIds.length;
-          reroutedRps = rpsIn * failedFraction;
+          let totalW = 0;
+          let failedW = 0;
+          for (const dsId of gaDownstreamIds) {
+            const zw = getActiveZoneWeight(dsId);
+            totalW += zw;
+            if (isDownstreamFailed(dsId)) failedW += zw;
+          }
+          reroutedRps = totalW > 0 ? rpsIn * (failedW / totalW) : 0;
         }
 
         const dropRate = computeDropRate(load);
