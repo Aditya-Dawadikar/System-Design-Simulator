@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
+import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
 const COLOR = '#34d399';
 const ICON = '◷';
@@ -117,6 +118,7 @@ export default memo(function CronJobNode({ id, selected }: NodeProps) {
         )}
       </div>
 
+      <NodeLocationBadge nodeId={id} />
       <Handle
         type="source"
         position={Position.Bottom}

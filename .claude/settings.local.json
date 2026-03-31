@@ -6,7 +6,9 @@
       "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)",
       "Bash(xargs grep:*)",
       "Bash(npx tsc:*)",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "Bash(grep -l \"NodeLocationBadge\" D:/SystemDesignSimulator/src/components/canvas/nodes/*.tsx)",
+      "Bash(grep -L \"NodeLocationBadge\" D:/SystemDesignSimulator/src/components/canvas/nodes/*.tsx)"
     ]
   }
 }

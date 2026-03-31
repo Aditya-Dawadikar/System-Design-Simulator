@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
+import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
 const ACCENT = '#f59e0b';
 
@@ -57,6 +58,7 @@ export default memo(function CommentNode({ id, selected }: NodeProps) {
         position={Position.Bottom}
         style={{ background: ACCENT, border: '2px solid #0d1117', width: 8, height: 8, bottom: -5, opacity: 0.6 }}
       />
+      <NodeLocationBadge nodeId={id} />
       <Handle
         type="target"
         position={Position.Bottom}

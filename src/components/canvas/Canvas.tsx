@@ -38,6 +38,8 @@ import CommentNode from './nodes/CommentNode';
 import TrafficGeneratorNode from './nodes/TrafficGeneratorNode';
 import RateLimiterNode from './nodes/RateLimiterNode';
 import ServiceMeshNode from './nodes/ServiceMeshNode';
+import RegionNode from './nodes/RegionNode';
+import AvailabilityZoneNode from './nodes/AvailabilityZoneNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -59,6 +61,8 @@ export const nodeTypes: NodeTypes = {
   traffic_generator: TrafficGeneratorNode,
   rate_limiter: RateLimiterNode,
   service_mesh: ServiceMeshNode,
+  region: RegionNode,
+  availability_zone: AvailabilityZoneNode,
 };
 
 export const edgeTypes: EdgeTypes = {
@@ -217,6 +221,9 @@ export default function Canvas() {
   const nodesWithSelection: Node[] = nodes.map((n) => ({
     ...n,
     selected: n.id === selectedNodeId,
+    // Container nodes sit behind all resource nodes and cannot be connected
+    zIndex: n.type === 'region' ? -2 : n.type === 'availability_zone' ? -1 : 0,
+    connectable: n.type !== 'region' && n.type !== 'availability_zone',
   }));
 
   return (

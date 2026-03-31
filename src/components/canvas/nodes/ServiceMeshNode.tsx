@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import type { NodeStatus } from '@/types';
+import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
 const COLOR = '#22d3ee';
 const ICON = '⊛';
@@ -232,6 +233,7 @@ export default memo(function ServiceMeshNode({ id, selected }: NodeProps) {
         </div>
       )}
 
+      <NodeLocationBadge nodeId={id} />
       <Handle
         type="source"
         position={Position.Bottom}

@@ -3,6 +3,7 @@
 import { useArchitectureStore } from '@/store/architectureStore';
 import { COMPONENT_BY_TYPE } from '@/constants/components';
 import type { ComponentType } from '@/types';
+import type { ComponentScope } from '@/constants/components';
 import CdnFields from './fields/CdnFields';
 import LoadBalancerFields from './fields/LoadBalancerFields';
 import AppServerFields from './fields/AppServerFields';
@@ -19,6 +20,8 @@ import CommentFields from './fields/CommentFields';
 import TrafficGeneratorFields from './fields/TrafficGeneratorFields';
 import RateLimiterFields from './fields/RateLimiterFields';
 import ServiceMeshFields from './fields/ServiceMeshFields';
+import RegionFields from './fields/RegionFields';
+import AvailabilityZoneFields from './fields/AvailabilityZoneFields';
 import EdgeInspector from './fields/EdgeInspector';
 
 function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
@@ -97,9 +100,105 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <RateLimiterFields nodeId={nodeId} />;
     case 'service_mesh':
       return <ServiceMeshFields nodeId={nodeId} />;
+    case 'region':
+      return <RegionFields nodeId={nodeId} />;
+    case 'availability_zone':
+      return <AvailabilityZoneFields nodeId={nodeId} />;
     default:
       return null;
   }
+}
+
+const selectStyle: React.CSSProperties = {
+  background: 'var(--bg-base)',
+  border: '1px solid var(--border)',
+  color: 'var(--text)',
+  borderRadius: '4px',
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '11px',
+  padding: '5px 8px',
+  width: '100%',
+  boxSizing: 'border-box',
+  outline: 'none',
+  cursor: 'pointer',
+};
+
+const locationLabelStyle: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: '9px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  fontWeight: 600,
+  display: 'block',
+  marginBottom: '5px',
+};
+
+/**
+ * Scope-aware placement field shown in the inspector for every resource node.
+ *  zonal    → "Availability Zone" dropdown (sets zoneId)
+ *  regional → "Region" dropdown           (sets regionId)
+ *  global / container → hidden
+ */
+function NodeLocationField({ nodeId, type }: { nodeId: string; type: ComponentType }) {
+  const def = COMPONENT_BY_TYPE[type];
+  const scope: ComponentScope | undefined = def?.scope;
+
+  const config = useArchitectureStore((s) => s.nodeConfigs[nodeId] ?? {});
+  const updateNodeConfig = useArchitectureStore((s) => s.updateNodeConfig);
+  const nodes = useArchitectureStore((s) => s.nodes);
+  const nodeConfigs = useArchitectureStore((s) => s.nodeConfigs);
+
+  // Containers and global components don't get a placement picker
+  if (!scope || scope === 'global') return null;
+
+  if (scope === 'zonal') {
+    const zones = nodes.filter((n) => n.type === 'availability_zone');
+    if (zones.length === 0) return null;
+    return (
+      <div style={{ marginBottom: '14px' }}>
+        <label style={{ ...locationLabelStyle, color: '#67e8f9' }}>◎ Availability Zone</label>
+        <select
+          value={config.zoneId ?? ''}
+          onChange={(e) => updateNodeConfig(nodeId, { zoneId: e.target.value || undefined })}
+          style={selectStyle}
+        >
+          <option value="">— No Zone —</option>
+          {zones.map((z) => {
+            const zCfg = nodeConfigs[z.id] ?? {};
+            return (
+              <option key={z.id} value={z.id}>
+                {zCfg.zoneName ?? zCfg.label ?? z.id}
+              </option>
+            );
+          })}
+        </select>
+      </div>
+    );
+  }
+
+  // regional
+  const regions = nodes.filter((n) => n.type === 'region');
+  if (regions.length === 0) return null;
+  return (
+    <div style={{ marginBottom: '14px' }}>
+      <label style={{ ...locationLabelStyle, color: '#c084fc' }}>⬡ Region</label>
+      <select
+        value={config.regionId ?? ''}
+        onChange={(e) => updateNodeConfig(nodeId, { regionId: e.target.value || undefined })}
+        style={selectStyle}
+      >
+        <option value="">— No Region —</option>
+        {regions.map((r) => {
+          const rCfg = nodeConfigs[r.id] ?? {};
+          return (
+            <option key={r.id} value={r.id}>
+              {rCfg.regionName ?? rCfg.label ?? r.id}
+            </option>
+          );
+        })}
+      </select>
+    </div>
+  );
 }
 
 function NodeHeader({ nodeId }: { nodeId: string }) {
@@ -313,6 +412,7 @@ export default function Inspector() {
               nodeId={selectedNodeId}
               label={selectedNode.type === 'comment' ? 'Title' : 'Name'}
             />
+            <NodeLocationField nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
             <NodeFields nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
           </div>
         </>

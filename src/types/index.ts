@@ -14,7 +14,9 @@ export type ComponentType =
   | 'comment'
   | 'traffic_generator'
   | 'rate_limiter'
-  | 'service_mesh';
+  | 'service_mesh'
+  | 'region'
+  | 'availability_zone';
 
 export type RateLimitAlgorithm =
   | 'token_bucket'
@@ -161,6 +163,16 @@ export interface NodeConfig {
   taskDurationMs?: number;    // time a single thread takes per task (ms)
   // Comment / Annotation
   commentBody?: string;
+  // Region / Availability Zone
+  regionName?: string;
+  zoneName?: string;
+  zoneFailed?: boolean;
+  // Zone/Region membership (for resource nodes)
+  zoneId?: string;
+  regionId?: string;
+  // Container sizing (for region and availability_zone nodes)
+  containerWidth?: number;
+  containerHeight?: number;
   // Traffic Generator
   generatorRps?: number;
   generatorPattern?: TrafficPattern;

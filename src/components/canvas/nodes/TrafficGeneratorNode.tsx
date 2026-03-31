@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
+import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
 const COLOR = '#f43f5e';
 const ICON = '↯';
@@ -125,6 +126,7 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
         </div>
       </div>
 
+      <NodeLocationBadge nodeId={id} />
       <Handle
         type="source"
         position={Position.Bottom}

@@ -1,6 +1,8 @@
 import type { ComponentType, NodeConfig, EdgeConfig, RateLimitAlgorithm } from '@/types';
 export type { RateLimitAlgorithm };
 
+export type ComponentScope = 'global' | 'regional' | 'zonal';
+
 export interface ComponentDefinition {
   type: ComponentType;
   label: string;
@@ -8,158 +10,26 @@ export interface ComponentDefinition {
   color: string;
   description: string;
   defaults: NodeConfig;
+  /**
+   * AWS-style placement scope:
+   *  global   — spans all regions (CDN, Traffic Generator, Comment)
+   *  regional — lives in one region, spans AZs (Load Balancer, S3, Lambda…)
+   *  zonal    — pinned to a single AZ (EC2/App Server, EBS, RDS instance…)
+   */
+  scope: ComponentScope;
 }
 
 export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
+  // ── Global ────────────────────────────────────────────────────────────────
+  // Spans all regions; not bound to any specific region or AZ.
   {
     type: 'cdn',
     label: 'CDN Edge',
     icon: '◎',
     color: '#00ddff',
     description: 'Content delivery network',
-    defaults: {
-      pops: 2,
-      cacheablePct: 60,
-      bandwidthGbps: 100,
-    },
-  },
-  {
-    type: 'load_balancer',
-    label: 'Load Balancer',
-    icon: '⇌',
-    color: '#ff55bb',
-    description: 'Distributes incoming traffic',
-    defaults: {
-      algorithm: 'round_robin',
-      healthChecks: true,
-      maxConnections: 100000,
-    },
-  },
-  {
-    type: 'app_server',
-    label: 'App Server',
-    icon: '◈',
-    color: '#00ff88',
-    description: 'Application compute layer',
-    defaults: {
-      instances: 1,
-      cpuCores: 4,
-      ramGb: 8,
-      rpsPerInstance: 500,
-      avgLatencyMs: 40,
-      minInstances: 1,
-      maxInstances: 8,
-      warmPoolSize: 1,
-      scaleUpCpuPct: 75,
-      scaleDownCpuPct: 25,
-      scaleUpCooldownTicks: 4,
-      scaleDownCooldownTicks: 12,
-      coldProvisionTicks: 6,
-    },
-  },
-  {
-    type: 'cache',
-    label: 'Redis Cache',
-    icon: '⚡',
-    color: '#ff8833',
-    description: 'In-memory key-value store',
-    defaults: {
-      memoryGb: 8,
-      ttlSeconds: 60,
-      evictionPolicy: 'lru',
-      clusterMode: false,
-    },
-  },
-  {
-    type: 'database',
-    label: 'PostgreSQL',
-    icon: '▣',
-    color: '#bb66ff',
-    description: 'Persistent relational database',
-    defaults: {
-      engine: 'PostgreSQL',
-      instanceType: 'db.m5.large',
-      storageGb: 100,
-      maxConnections: 200,
-      readReplicas: 0,
-      shards: 1,
-      rpsPerShard: 800,
-    },
-  },
-  {
-    type: 'cloud_storage',
-    label: 'Cloud Storage',
-    icon: '◫',
-    color: '#38bdf8',
-    description: 'Object storage buckets',
-    defaults: {
-      storageThroughputMbps: 1000,
-      objectSizeKb: 512,
-      storageClass: 'standard',
-      storageGb: 1000,
-    },
-  },
-  {
-    type: 'block_storage',
-    label: 'Block Storage',
-    icon: '▤',
-    color: '#d97706',
-    description: 'Persistent block volume (NVMe/SSD/HDD)',
-    defaults: {
-      diskType: 'ssd',
-      iops: 3000,
-      storageGb: 100,
-      objectSizeKb: 64,
-    },
-  },
-  {
-    type: 'network_storage',
-    label: 'Network Storage',
-    icon: '⊜',
-    color: '#6366f1',
-    description: 'Shared network file system (NFS/SMB/CephFS)',
-    defaults: {
-      nfsProtocol: 'nfs',
-      storageThroughputMbps: 500,
-      connectionLimit: 100,
-      objectSizeKb: 64,
-      storageGb: 1000,
-    },
-  },
-  {
-    type: 'pubsub',
-    label: 'Pub/Sub',
-    icon: '⊕',
-    color: '#fb923c',
-    description: 'Async message bus',
-    defaults: {
-      partitions: 4,
-      messageRetentionHours: 24,
-      maxMessageSizeKb: 10,
-    },
-  },
-  {
-    type: 'cloud_function',
-    label: 'Cloud Function',
-    icon: 'ƒ',
-    color: '#a78bfa',
-    description: 'Serverless compute',
-    defaults: {
-      functionMemoryMb: 256,
-      maxConcurrency: 100,
-      avgExecutionMs: 200,
-    },
-  },
-  {
-    type: 'cron_job',
-    label: 'Cron Job',
-    icon: '◷',
-    color: '#34d399',
-    description: 'Schedule-driven task emitter',
-    defaults: {
-      intervalMinutes: 5,
-      tasksPerRun: 100,
-    },
+    scope: 'global',
+    defaults: { pops: 2, cacheablePct: 60, bandwidthGbps: 100 },
   },
   {
     type: 'traffic_generator',
@@ -167,10 +37,8 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     icon: '↯',
     color: '#f43f5e',
     description: 'Injects traffic at a configurable RPS',
-    defaults: {
-      generatorRps: 1000,
-      generatorPattern: 'steady',
-    },
+    scope: 'global',
+    defaults: { generatorRps: 1000, generatorPattern: 'steady' },
   },
   {
     type: 'comment',
@@ -178,50 +46,158 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     icon: '//',
     color: '#f59e0b',
     description: 'Annotation node — no simulation effect',
-    defaults: {
-      commentBody: '',
-    },
+    scope: 'global',
+    defaults: { commentBody: '' },
+  },
+
+  // ── Regional ──────────────────────────────────────────────────────────────
+  // Lives inside one region; automatically spans multiple AZs within that region.
+  // AWS analogues: ALB/NLB, S3, SQS/SNS/Kinesis, Lambda, EventBridge.
+  {
+    type: 'load_balancer',
+    label: 'Load Balancer',
+    icon: '⇌',
+    color: '#ff55bb',
+    description: 'Regional — distributes traffic across AZs (ALB / NLB)',
+    scope: 'regional',
+    defaults: { algorithm: 'round_robin', healthChecks: true, maxConnections: 100000 },
   },
   {
-    type: 'worker_pool',
-    label: 'Worker Pool',
-    icon: '⚙',
-    color: '#facc15',
-    description: 'Parallel task processing pool',
-    defaults: {
-      workerCount: 4,
-      threadCount: 4,
-      taskDurationMs: 500,
-    },
+    type: 'cloud_storage',
+    label: 'Cloud Storage',
+    icon: '◫',
+    color: '#38bdf8',
+    description: 'Regional — object storage replicated across AZs (S3)',
+    scope: 'regional',
+    defaults: { storageThroughputMbps: 1000, objectSizeKb: 512, storageClass: 'standard', storageGb: 1000 },
+  },
+  {
+    type: 'pubsub',
+    label: 'Pub/Sub',
+    icon: '⊕',
+    color: '#fb923c',
+    description: 'Regional — async message bus replicated across AZs (SQS / Kinesis)',
+    scope: 'regional',
+    defaults: { partitions: 4, messageRetentionHours: 24, maxMessageSizeKb: 10 },
+  },
+  {
+    type: 'cloud_function',
+    label: 'Cloud Function',
+    icon: 'ƒ',
+    color: '#a78bfa',
+    description: 'Regional — serverless compute, scheduler places across AZs (Lambda)',
+    scope: 'regional',
+    defaults: { functionMemoryMb: 256, maxConcurrency: 100, avgExecutionMs: 200 },
   },
   {
     type: 'rate_limiter',
     label: 'Rate Limiter',
     icon: '⊘',
     color: '#c026d3',
-    description: 'Throttles traffic by rate-limiting algorithm',
-    defaults: {
-      rateLimitAlgorithm: 'token_bucket',
-      requestsPerSecond: 1000,
-      burstCapacity: 200,
-      windowSizeMs: 1000,
-      maxQueueSize: 500,
-    },
+    description: 'Regional — throttles traffic across AZs',
+    scope: 'regional',
+    defaults: { rateLimitAlgorithm: 'token_bucket', requestsPerSecond: 1000, burstCapacity: 200, windowSizeMs: 1000, maxQueueSize: 500 },
   },
   {
     type: 'service_mesh',
     label: 'Service Mesh',
     icon: '⊛',
     color: '#22d3ee',
-    description: 'Sidecar proxy layer — mTLS, retries, circuit breaking',
+    description: 'Regional — control plane spans AZs; data plane sidecars are zonal (Istio / App Mesh)',
+    scope: 'regional',
+    defaults: { mtlsEnabled: true, observabilityLevel: 'basic', proxyOverheadMs: 2, meshRetryCount: 1, meshCircuitBreakerEnabled: false, meshCircuitBreakerThreshold: 50 },
+  },
+  {
+    type: 'cron_job',
+    label: 'Cron Job',
+    icon: '◷',
+    color: '#34d399',
+    description: 'Regional — schedule-driven task emitter (EventBridge Scheduler)',
+    scope: 'regional',
+    defaults: { intervalMinutes: 5, tasksPerRun: 100 },
+  },
+
+  // ── Zonal ─────────────────────────────────────────────────────────────────
+  // Pinned to a single AZ; fails with that AZ.
+  // AWS analogues: EC2, ElastiCache node, RDS instance, EBS volume, EFS mount target.
+  {
+    type: 'app_server',
+    label: 'App Server',
+    icon: '◈',
+    color: '#00ff88',
+    description: 'Zonal — compute instance pinned to one AZ (EC2 / ECS task)',
+    scope: 'zonal',
     defaults: {
-      mtlsEnabled: true,
-      observabilityLevel: 'basic',
-      proxyOverheadMs: 2,
-      meshRetryCount: 1,
-      meshCircuitBreakerEnabled: false,
-      meshCircuitBreakerThreshold: 50,
+      instances: 1, cpuCores: 4, ramGb: 8, rpsPerInstance: 500, avgLatencyMs: 40,
+      minInstances: 1, maxInstances: 8, warmPoolSize: 1,
+      scaleUpCpuPct: 75, scaleDownCpuPct: 25,
+      scaleUpCooldownTicks: 4, scaleDownCooldownTicks: 12, coldProvisionTicks: 6,
     },
+  },
+  {
+    type: 'cache',
+    label: 'Redis Cache',
+    icon: '⚡',
+    color: '#ff8833',
+    description: 'Zonal — in-memory cache node pinned to one AZ (ElastiCache node)',
+    scope: 'zonal',
+    defaults: { memoryGb: 8, ttlSeconds: 60, evictionPolicy: 'lru', clusterMode: false },
+  },
+  {
+    type: 'database',
+    label: 'PostgreSQL',
+    icon: '▣',
+    color: '#bb66ff',
+    description: 'Zonal — primary or replica DB instance in a single AZ (RDS / Aurora)',
+    scope: 'zonal',
+    defaults: { engine: 'PostgreSQL', instanceType: 'db.m5.large', storageGb: 100, maxConnections: 200, readReplicas: 0, shards: 1, rpsPerShard: 800 },
+  },
+  {
+    type: 'block_storage',
+    label: 'Block Storage',
+    icon: '▤',
+    color: '#d97706',
+    description: 'Zonal — block volume attached to one AZ (EBS)',
+    scope: 'zonal',
+    defaults: { diskType: 'ssd', iops: 3000, storageGb: 100, objectSizeKb: 64 },
+  },
+  {
+    type: 'network_storage',
+    label: 'Network Storage',
+    icon: '⊜',
+    color: '#6366f1',
+    description: 'Zonal — NFS/SMB mount target in one AZ (EFS mount target)',
+    scope: 'zonal',
+    defaults: { nfsProtocol: 'nfs', storageThroughputMbps: 500, connectionLimit: 100, objectSizeKb: 64, storageGb: 1000 },
+  },
+  {
+    type: 'worker_pool',
+    label: 'Worker Pool',
+    icon: '⚙',
+    color: '#facc15',
+    description: 'Zonal — EC2-backed worker fleet in one AZ',
+    scope: 'zonal',
+    defaults: { workerCount: 4, threadCount: 4, taskDurationMs: 500 },
+  },
+
+  // ── Infrastructure containers ─────────────────────────────────────────────
+  {
+    type: 'region',
+    label: 'Region',
+    icon: '⬡',
+    color: '#c084fc',
+    description: 'Cloud region — groups availability zones (e.g. us-east-1)',
+    scope: 'global',
+    defaults: { regionName: 'us-east-1', containerWidth: 900, containerHeight: 560 },
+  },
+  {
+    type: 'availability_zone',
+    label: 'Availability Zone',
+    icon: '◎',
+    color: '#67e8f9',
+    description: 'Isolated failure domain within a region (e.g. us-east-1a)',
+    scope: 'global',
+    defaults: { zoneName: 'us-east-1a', zoneFailed: false, containerWidth: 380, containerHeight: 440 },
   },
 ];
 

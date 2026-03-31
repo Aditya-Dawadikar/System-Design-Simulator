@@ -57,6 +57,8 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   traffic_generator: 0,  // pure source — no latency on the generator itself
   rate_limiter: 1,       // minimal overhead per request
   service_mesh: 2,       // sidecar proxy overhead; overridden by proxyOverheadMs config
+  region: 0,             // structural container — no simulation latency
+  availability_zone: 0,  // structural container — no simulation latency
 };
 
 // ---------------------------------------------------------------------------
@@ -255,7 +257,9 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
 
     case 'comment':
     case 'traffic_generator':
-      // Annotation / pure-source nodes — never get overloaded
+    case 'region':
+    case 'availability_zone':
+      // Annotation / pure-source / structural container nodes — never get overloaded
       return Number.MAX_SAFE_INTEGER;
 
     case 'rate_limiter':
@@ -558,6 +562,23 @@ export function runSimulationTick(
 
     // ---- Error rate ----
     let errorRate = computeErrorRate(load);
+
+    // ---- Zone failure: force-fail all resources assigned to a failed zone ----
+    if (type !== 'region' && type !== 'availability_zone' && type !== 'comment') {
+      const nodeZoneId = config.zoneId;
+      if (nodeZoneId) {
+        const zoneConfig = nodeConfigs[nodeZoneId];
+        if (zoneConfig?.zoneFailed) {
+          nodeMetrics[node.id] = {
+            rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
+            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+          };
+          rpsOutMap.set(node.id, 0);
+          readRatioOutMap.set(node.id, readRatio);
+          continue;
+        }
+      }
+    }
 
     // ---- Per-type tick: rpsOut, readRatioOut, latency penalties, detail ----
     const prevNodeMetrics = previousMetrics[node.id];
@@ -1047,6 +1068,17 @@ export function runSimulationTick(
         break;
       }
 
+      case 'region':
+      case 'availability_zone': {
+        // Structural container nodes — transparent pass-through with no simulation effect
+        rpsOut = rpsIn;
+        load = 0;
+        failed = false;
+        errorRate = 0;
+        latencyMs = 0;
+        break;
+      }
+
       default: {
         const dropRate = computeDropRate(load);
         rpsOut = rpsIn * (1 - dropRate);
@@ -1077,6 +1109,19 @@ export function runSimulationTick(
   }
 
   // ---- 6. Edge metrics ----
+  // Build zone/region membership maps for cross-zone latency penalties.
+  // A node's region is inferred via its zone's regionId.
+  const nodeZoneIdMap: Record<string, string> = {};
+  const nodeRegionIdMap: Record<string, string> = {};
+  for (const n of nodes) {
+    const cfg = nodeConfigs[n.id] ?? {};
+    if (cfg.zoneId) {
+      nodeZoneIdMap[n.id] = cfg.zoneId;
+      const zoneCfg = nodeConfigs[cfg.zoneId];
+      if (zoneCfg?.regionId) nodeRegionIdMap[n.id] = zoneCfg.regionId;
+    }
+  }
+
   const edgeMetrics: Record<string, EdgeMetrics> = {};
 
   for (const edge of edges) {
@@ -1085,9 +1130,22 @@ export function runSimulationTick(
     const sourceMetric = nodeMetrics[edge.source];
     if (!sourceMetric) continue;
 
+    // Cross-AZ/cross-region latency penalty
+    const srcZone = nodeZoneIdMap[edge.source];
+    const tgtZone = nodeZoneIdMap[edge.target];
+    const srcRegion = nodeRegionIdMap[edge.source];
+    const tgtRegion = nodeRegionIdMap[edge.target];
+
+    let crossLatencyMs = 0;
+    if (srcRegion && tgtRegion && srcRegion !== tgtRegion) {
+      crossLatencyMs = 75; // cross-region ~75 ms RTT overhead
+    } else if (srcZone && tgtZone && srcZone !== tgtZone) {
+      crossLatencyMs = 2;  // cross-AZ (same region) ~2 ms RTT overhead
+    }
+
     edgeMetrics[edge.id] = {
       rps: sourceMetric.rpsOut,
-      latencyMs: sourceMetric.latencyMs,
+      latencyMs: sourceMetric.latencyMs + crossLatencyMs,
       isBottleneck: sourceMetric.load > 0.9,
     };
   }

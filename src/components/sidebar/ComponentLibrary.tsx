@@ -12,6 +12,7 @@ type ComponentCategory =
   | 'Network'
   | 'Scaling'
   | 'Async'
+  | 'Infra'
   | 'Other';
 
 const CATEGORY_ORDER: ComponentCategory[] = [
@@ -20,6 +21,7 @@ const CATEGORY_ORDER: ComponentCategory[] = [
   'Network',
   'Scaling',
   'Async',
+  'Infra',
   'Other',
 ];
 
@@ -39,6 +41,8 @@ const COMPONENT_CATEGORY: Record<ComponentDefinition['type'], ComponentCategory>
   traffic_generator: 'Scaling',
   pubsub: 'Async',
   cron_job: 'Async',
+  region: 'Infra',
+  availability_zone: 'Infra',
   comment: 'Other',
 };
 
@@ -50,6 +54,7 @@ export default function ComponentLibrary() {
     Network: false,
     Scaling: false,
     Async: false,
+    Infra: false,
     Other: false,
   });
 
@@ -71,6 +76,7 @@ export default function ComponentLibrary() {
     Network: [],
     Scaling: [],
     Async: [],
+    Infra: [],
     Other: [],
   });
 

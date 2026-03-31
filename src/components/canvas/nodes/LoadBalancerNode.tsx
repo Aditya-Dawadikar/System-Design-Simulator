@@ -5,6 +5,7 @@ import { Handle, Position, type NodeProps } from 'reactflow';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { useSimulationStore } from '@/store/simulationStore';
 import type { NodeStatus } from '@/types';
+import NodeLocationBadge from '@/components/shared/NodeLocationBadge';
 
 const COLOR = '#ff55bb';
 const ICON = '⇌';
@@ -188,6 +189,7 @@ export default memo(function LoadBalancerNode({ id, selected }: NodeProps) {
         </div>
       )}
 
+      <NodeLocationBadge nodeId={id} />
       <Handle
         type="source"
         position={Position.Bottom}
