@@ -119,7 +119,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
       setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
       setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
 
-      loadTemplate: (template, scenarioId = null) => {
+      loadTemplate: (template, scenarioId) => {
         set({
           nodes: template.nodes,
           edges: template.edges,
