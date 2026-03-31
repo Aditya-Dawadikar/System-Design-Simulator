@@ -8,7 +8,8 @@
       "Bash(npx tsc:*)",
       "Skill(update-config)",
       "Bash(grep -l \"NodeLocationBadge\" D:/SystemDesignSimulator/src/components/canvas/nodes/*.tsx)",
-      "Bash(grep -L \"NodeLocationBadge\" D:/SystemDesignSimulator/src/components/canvas/nodes/*.tsx)"
+      "Bash(grep -L \"NodeLocationBadge\" D:/SystemDesignSimulator/src/components/canvas/nodes/*.tsx)",
+      "Bash(grep:*)"
     ]
   }
 }

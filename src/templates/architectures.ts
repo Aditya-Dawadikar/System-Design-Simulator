@@ -609,30 +609,37 @@ function buildMultiAzHA(): ArchitectureTemplate {
 
 function buildMultiRegion(): ArchitectureTemplate {
   // Layout:
-  //   Global Accelerator (with health-aware failover) sits in front and
-  //   distributes traffic 50/50 across two independent regional stacks.
-  //   Each region runs two AZs with a regional LB, app servers, cache,
-  //   and database. Cross-region DB replication carries a 75 ms penalty.
+  //   Global Accelerator (with health-aware failover) distributes traffic
+  //   50/50 across two regional stacks. Each region has a regional LB and
+  //   API Gateway. Both microservices (Users + Orders) are replicated in
+  //   every AZ for full zone redundancy. The gateway routes 60 % to Users
+  //   and 40 % to Orders, split evenly across both AZ replicas (30/30/20/20).
+  //   Cross-region DB replication carries a 75 ms penalty.
   //
   //   Traffic → CDN → Global Accelerator
-  //     ├── us-east-1: LB-east → App-a + App-b → Cache → DB-east (primary)
-  //     └── us-west-2: LB-west → App-a + App-b → Cache → DB-west (replica)
-  //   DB-east  → DB-west  (cross-region async replication, +75 ms)
+  //     ├── us-east-1: LB → GW ─┬─30%→ Users  (east-1a)
+  //     │                        ├─30%→ Users  (east-1b)
+  //     │                        ├─20%→ Orders (east-1a)
+  //     │                        └─20%→ Orders (east-1b)
+  //     └── us-west-2: (same topology)
   //
-  //   Capacity sizing (active-active N-1 model):
-  //     Each region: 2 AZs × 4 inst × 600 rps = 4 800 rps
-  //     Normal  (3 000 rps total, 50/50): ~31 % load per region — OK
-  //     Failover (one region down, 3 000 rps to survivor): ~63 % — STRESSED
+  //   Capacity sizing (active-active N-1 model, 3 000 rps):
+  //     Normal (50/50 per region, 1 500 rps each):
+  //       Users per AZ:  30 % × 1 500 = 450 rps → 2 inst × 600 = 37.5 % load
+  //       Orders per AZ: 20 % × 1 500 = 300 rps → 2 inst × 600 = 25 % load
+  //     Failover (one region down, 3 000 rps to survivor):
+  //       Users per AZ:  30 % × 3 000 = 900 rps → 75 % load — STRESSED
+  //       Orders per AZ: 20 % × 3 000 = 600 rps → 50 % load — OK
   //
-  //   To simulate zone failure (intra-region):
-  //     Select AZ-east-a → "Simulate Zone Failure" → ON.
-  //     LB-east routes only to App-east-b; east region absorbs at ~62 %.
+  //   Zone failure: toggle AZ-east-a → ON.
+  //     GW still has Users-east-b + Orders-east-b healthy; traffic re-weights
+  //     to the surviving AZ instances (50/50 split of remaining capacity).
   //
-  //   To simulate region failure (cross-region failover):
-  //     Select us-east-1 → "Simulate Region Failure" → ON.
-  //     Global Accelerator detects LB-east is down and shifts 100 % of
-  //     traffic to us-west-2. West climbs to ~63 % — healthy under load.
-  //     Turn off the failure to watch traffic balance back to 50/50.
+  //   Region failure: toggle us-east-1 → ON.
+  //     GA shifts 100 % to us-west-2.
+  //
+  //   Adjust microservice traffic mix:
+  //     Select GW → Route Table → change weights.
 
   const nodes: Node[] = [
     // ── Global ingress ────────────────────────────────────────────────────
@@ -640,46 +647,66 @@ function buildMultiRegion(): ArchitectureTemplate {
     makeNode('mr-cdn',  'cdn',                640,  -20),
     makeNode('mr-ga',   'global_accelerator', 640,  110),
     // ── us-east-1 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-east',    'region',            50,  240),
-    makeNode('mr-az-east-a',   'availability_zone', 85,  310),
-    makeNode('mr-az-east-b',   'availability_zone', 390, 310),
-    makeNode('mr-lb-east',     'load_balancer',     315, 280),
-    makeNode('mr-app-east-a',  'app_server',        120, 390),
-    makeNode('mr-app-east-b',  'app_server',        425, 390),
-    makeNode('mr-cache-east',  'cache',             265, 540),
-    makeNode('mr-db-east',     'database',          265, 660),
+    makeNode('mr-reg-east',        'region',            50,  210),
+    makeNode('mr-az-east-a',       'availability_zone', 85,  380),
+    makeNode('mr-az-east-b',       'availability_zone', 390, 380),
+    makeNode('mr-lb-east',         'load_balancer',     290, 258),
+    makeNode('mr-gw-east',         'api_gateway',       290, 345),
+    makeNode('mr-users-east-a',    'app_server',        110, 450),
+    makeNode('mr-orders-east-a',   'app_server',        110, 614),
+    makeNode('mr-users-east-b',    'app_server',        415, 450),
+    makeNode('mr-orders-east-b',   'app_server',        415, 614),
+    makeNode('mr-cache-east',      'cache',             265, 818),
+    makeNode('mr-db-east',         'database',          265, 938),
     // ── us-west-2 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-west',    'region',            780, 240),
-    makeNode('mr-az-west-a',   'availability_zone', 815, 310),
-    makeNode('mr-az-west-b',   'availability_zone', 1120, 310),
-    makeNode('mr-lb-west',     'load_balancer',     1045, 280),
-    makeNode('mr-app-west-a',  'app_server',        850, 390),
-    makeNode('mr-app-west-b',  'app_server',        1155, 390),
-    makeNode('mr-cache-west',  'cache',             995, 540),
-    makeNode('mr-db-west',     'database',          995, 660),
+    makeNode('mr-reg-west',        'region',            780, 210),
+    makeNode('mr-az-west-a',       'availability_zone', 815, 380),
+    makeNode('mr-az-west-b',       'availability_zone', 1120, 380),
+    makeNode('mr-lb-west',         'load_balancer',     1020, 258),
+    makeNode('mr-gw-west',         'api_gateway',       1020, 345),
+    makeNode('mr-users-west-a',    'app_server',        840,  450),
+    makeNode('mr-orders-west-a',   'app_server',        840,  614),
+    makeNode('mr-users-west-b',    'app_server',        1145, 450),
+    makeNode('mr-orders-west-b',   'app_server',        1145, 614),
+    makeNode('mr-cache-west',      'cache',             995,  818),
+    makeNode('mr-db-west',         'database',          995,  938),
   ];
 
   const edges: Edge[] = [
-    makeEdge('mr-tgen',        'mr-cdn'),
-    makeEdge('mr-cdn',         'mr-ga'),
-    makeEdge('mr-ga',          'mr-lb-east'),       // 50 % to east
-    makeEdge('mr-ga',          'mr-lb-west'),       // 50 % to west
-    // East internal
-    makeEdge('mr-lb-east',     'mr-app-east-a'),    // 50 % to AZ-a
-    makeEdge('mr-lb-east',     'mr-app-east-b'),    // 50 % to AZ-b
-    makeEdge('mr-app-east-a',  'mr-cache-east'),
-    makeEdge('mr-app-east-a',  'mr-db-east'),
-    makeEdge('mr-app-east-b',  'mr-cache-east'),
-    makeEdge('mr-app-east-b',  'mr-db-east'),
-    // West internal
-    makeEdge('mr-lb-west',     'mr-app-west-a'),    // 50 % to AZ-a
-    makeEdge('mr-lb-west',     'mr-app-west-b'),    // 50 % to AZ-b
-    makeEdge('mr-app-west-a',  'mr-cache-west'),
-    makeEdge('mr-app-west-a',  'mr-db-west'),
-    makeEdge('mr-app-west-b',  'mr-cache-west'),
-    makeEdge('mr-app-west-b',  'mr-db-west'),
+    makeEdge('mr-tgen',            'mr-cdn'),
+    makeEdge('mr-cdn',             'mr-ga'),
+    makeEdge('mr-ga',              'mr-lb-east'),            // 50 % to east
+    makeEdge('mr-ga',              'mr-lb-west'),            // 50 % to west
+    // East: LB → GW → 4 service instances (30/30/20/20 via gatewayRoutes)
+    makeEdge('mr-lb-east',         'mr-gw-east'),
+    makeEdge('mr-gw-east',         'mr-users-east-a'),
+    makeEdge('mr-gw-east',         'mr-users-east-b'),
+    makeEdge('mr-gw-east',         'mr-orders-east-a'),
+    makeEdge('mr-gw-east',         'mr-orders-east-b'),
+    makeEdge('mr-users-east-a',    'mr-cache-east'),
+    makeEdge('mr-users-east-a',    'mr-db-east'),
+    makeEdge('mr-users-east-b',    'mr-cache-east'),
+    makeEdge('mr-users-east-b',    'mr-db-east'),
+    makeEdge('mr-orders-east-a',   'mr-cache-east'),
+    makeEdge('mr-orders-east-a',   'mr-db-east'),
+    makeEdge('mr-orders-east-b',   'mr-cache-east'),
+    makeEdge('mr-orders-east-b',   'mr-db-east'),
+    // West: LB → GW → 4 service instances
+    makeEdge('mr-lb-west',         'mr-gw-west'),
+    makeEdge('mr-gw-west',         'mr-users-west-a'),
+    makeEdge('mr-gw-west',         'mr-users-west-b'),
+    makeEdge('mr-gw-west',         'mr-orders-west-a'),
+    makeEdge('mr-gw-west',         'mr-orders-west-b'),
+    makeEdge('mr-users-west-a',    'mr-cache-west'),
+    makeEdge('mr-users-west-a',    'mr-db-west'),
+    makeEdge('mr-users-west-b',    'mr-cache-west'),
+    makeEdge('mr-users-west-b',    'mr-db-west'),
+    makeEdge('mr-orders-west-a',   'mr-cache-west'),
+    makeEdge('mr-orders-west-a',   'mr-db-west'),
+    makeEdge('mr-orders-west-b',   'mr-cache-west'),
+    makeEdge('mr-orders-west-b',   'mr-db-west'),
     // Cross-region DB replication (+75 ms)
-    makeEdge('mr-db-east', 'mr-db-west'),
+    makeEdge('mr-db-east',         'mr-db-west'),
   ];
 
   return {
@@ -692,8 +719,8 @@ function buildMultiRegion(): ArchitectureTemplate {
         readRatioPct:     65,
       }),
       'mr-cdn': makeConfig('cdn', {
-        pops:         8,
-        cacheablePct: 50,
+        pops:          8,
+        cacheablePct:  50,
         bandwidthGbps: 200,
       }),
       'mr-ga': makeConfig('global_accelerator', {
@@ -706,7 +733,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         regionName:      'us-east-1',
         regionFailed:    false,
         containerWidth:  700,
-        containerHeight: 550,
+        containerHeight: 860,
       }),
       'mr-az-east-a': makeConfig('availability_zone', {
         zoneName:        'us-east-1a',
@@ -728,18 +755,45 @@ function buildMultiRegion(): ArchitectureTemplate {
         healthChecks: true,
         regionId:     'mr-reg-east',
       }),
-      'mr-app-east-a': makeConfig('app_server', {
-        label:          'App (east-1a)',
-        instances:      4,
+      'mr-gw-east': makeConfig('api_gateway', {
+        label:               'API GW (us-east-1)',
+        regionId:            'mr-reg-east',
+        gatewayAuthEnabled:  false,
+        gatewayCacheEnabled: true,
+        gatewayCacheHitPct:  25,
+        gatewayRoutes: [
+          { id: 'gwe-r1', path: '/api/users',  destNodeId: 'mr-users-east-a',  weightPct: 30 },
+          { id: 'gwe-r2', path: '/api/users',  destNodeId: 'mr-users-east-b',  weightPct: 30 },
+          { id: 'gwe-r3', path: '/api/orders', destNodeId: 'mr-orders-east-a', weightPct: 20 },
+          { id: 'gwe-r4', path: '/api/orders', destNodeId: 'mr-orders-east-b', weightPct: 20 },
+        ],
+      }),
+      'mr-users-east-a': makeConfig('app_server', {
+        label:          'Users (east-1a)',
+        instances:      2,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-east-a',
       }),
-      'mr-app-east-b': makeConfig('app_server', {
-        label:          'App (east-1b)',
-        instances:      4,
+      'mr-orders-east-a': makeConfig('app_server', {
+        label:          'Orders (east-1a)',
+        instances:      2,
+        rpsPerInstance: 600,
+        workloadType:   'cpu_bound',
+        zoneId:         'mr-az-east-a',
+      }),
+      'mr-users-east-b': makeConfig('app_server', {
+        label:          'Users (east-1b)',
+        instances:      2,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
+        zoneId:         'mr-az-east-b',
+      }),
+      'mr-orders-east-b': makeConfig('app_server', {
+        label:          'Orders (east-1b)',
+        instances:      2,
+        rpsPerInstance: 600,
+        workloadType:   'cpu_bound',
         zoneId:         'mr-az-east-b',
       }),
       'mr-cache-east': makeConfig('cache', {
@@ -762,7 +816,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         regionName:      'us-west-2',
         regionFailed:    false,
         containerWidth:  700,
-        containerHeight: 550,
+        containerHeight: 860,
       }),
       'mr-az-west-a': makeConfig('availability_zone', {
         zoneName:        'us-west-2a',
@@ -784,18 +838,45 @@ function buildMultiRegion(): ArchitectureTemplate {
         healthChecks: true,
         regionId:     'mr-reg-west',
       }),
-      'mr-app-west-a': makeConfig('app_server', {
-        label:          'App (west-2a)',
-        instances:      4,
+      'mr-gw-west': makeConfig('api_gateway', {
+        label:               'API GW (us-west-2)',
+        regionId:            'mr-reg-west',
+        gatewayAuthEnabled:  false,
+        gatewayCacheEnabled: true,
+        gatewayCacheHitPct:  25,
+        gatewayRoutes: [
+          { id: 'gww-r1', path: '/api/users',  destNodeId: 'mr-users-west-a',  weightPct: 30 },
+          { id: 'gww-r2', path: '/api/users',  destNodeId: 'mr-users-west-b',  weightPct: 30 },
+          { id: 'gww-r3', path: '/api/orders', destNodeId: 'mr-orders-west-a', weightPct: 20 },
+          { id: 'gww-r4', path: '/api/orders', destNodeId: 'mr-orders-west-b', weightPct: 20 },
+        ],
+      }),
+      'mr-users-west-a': makeConfig('app_server', {
+        label:          'Users (west-2a)',
+        instances:      2,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-west-a',
       }),
-      'mr-app-west-b': makeConfig('app_server', {
-        label:          'App (west-2b)',
-        instances:      4,
+      'mr-orders-west-a': makeConfig('app_server', {
+        label:          'Orders (west-2a)',
+        instances:      2,
+        rpsPerInstance: 600,
+        workloadType:   'cpu_bound',
+        zoneId:         'mr-az-west-a',
+      }),
+      'mr-users-west-b': makeConfig('app_server', {
+        label:          'Users (west-2b)',
+        instances:      2,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
+        zoneId:         'mr-az-west-b',
+      }),
+      'mr-orders-west-b': makeConfig('app_server', {
+        label:          'Orders (west-2b)',
+        instances:      2,
+        rpsPerInstance: 600,
+        workloadType:   'cpu_bound',
         zoneId:         'mr-az-west-b',
       }),
       'mr-cache-west': makeConfig('cache', {
@@ -817,13 +898,17 @@ function buildMultiRegion(): ArchitectureTemplate {
     edgeConfigs: {
       ...edgeConfigs(edges),
       // Global Accelerator: 50 / 50 split across regions (failover overrides this)
-      'mr-ga->mr-lb-east':       { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-ga->mr-lb-west':       { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      // Each regional LB: 50 / 50 across its two AZs
-      'mr-lb-east->mr-app-east-a': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-lb-east->mr-app-east-b': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-lb-west->mr-app-west-a': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-lb-west->mr-app-west-b': { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-ga->mr-lb-east':                { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-ga->mr-lb-west':                { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      // Gateway routes: 30 % each to users replicas, 20 % each to orders replicas
+      'mr-gw-east->mr-users-east-a':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-east->mr-users-east-b':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-east->mr-orders-east-a':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-east->mr-orders-east-b':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-west->mr-users-west-a':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-west->mr-users-west-b':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-west->mr-orders-west-a':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-west->mr-orders-west-b':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
     },
   };
 }
@@ -916,9 +1001,9 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
   {
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
-    description: 'CDN → Global Accelerator fans traffic 50/50 to us-east-1 and us-west-2, each with two AZs and a full app stack. Toggle "Simulate Region Failure" on us-east-1 to watch the accelerator shift all traffic to us-west-2. Toggle "Simulate Zone Failure" within a region to test intra-region resilience.',
+    description: 'CDN → Global Accelerator fans traffic 50/50 to us-east-1 and us-west-2. Each region has an API Gateway that routes 60 % to Users Service and 40 % to Orders Service, demonstrating per-microservice traffic shaping. Toggle "Simulate Region Failure" to watch the accelerator shift all traffic to the survivor region.',
     difficulty: 'advanced',
-    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'Replication', 'Cross-Region', 'Failover'],
+    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Microservices', 'Replication', 'Cross-Region', 'Failover'],
     template: buildMultiRegion(),
   },
 ];

@@ -41,6 +41,7 @@ import ServiceMeshNode from './nodes/ServiceMeshNode';
 import RegionNode from './nodes/RegionNode';
 import AvailabilityZoneNode from './nodes/AvailabilityZoneNode';
 import GlobalAcceleratorNode from './nodes/GlobalAcceleratorNode';
+import ApiGatewayNode from './nodes/ApiGatewayNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -48,6 +49,7 @@ import EdgeWire from './EdgeWire';
 export const nodeTypes: NodeTypes = {
   cdn: CdnNode,
   load_balancer: LoadBalancerNode,
+  api_gateway: ApiGatewayNode,
   app_server: AppServerNode,
   cache: CacheNode,
   database: DatabaseNode,

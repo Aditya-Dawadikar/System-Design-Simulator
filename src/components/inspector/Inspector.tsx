@@ -23,6 +23,7 @@ import ServiceMeshFields from './fields/ServiceMeshFields';
 import RegionFields from './fields/RegionFields';
 import AvailabilityZoneFields from './fields/AvailabilityZoneFields';
 import GlobalAcceleratorFields from './fields/GlobalAcceleratorFields';
+import ApiGatewayFields from './fields/ApiGatewayFields';
 import EdgeInspector from './fields/EdgeInspector';
 
 function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
@@ -73,6 +74,8 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <CdnFields nodeId={nodeId} />;
     case 'load_balancer':
       return <LoadBalancerFields nodeId={nodeId} />;
+    case 'api_gateway':
+      return <ApiGatewayFields nodeId={nodeId} />;
     case 'app_server':
       return <AppServerFields nodeId={nodeId} />;
     case 'cache':

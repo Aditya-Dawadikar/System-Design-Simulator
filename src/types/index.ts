@@ -1,6 +1,7 @@
 export type ComponentType =
   | 'cdn'
   | 'load_balancer'
+  | 'api_gateway'
   | 'app_server'
   | 'cache'
   | 'database'
@@ -68,7 +69,8 @@ export type ComponentDetail =
   | { kind: 'worker_pool';    queueDepth: number; workerUtilization: number; taskBacklogMs: number }
   | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number }
   | { kind: 'service_mesh'; activeConnections: number; mtlsHandshakeRate: number; circuitBroken: boolean; retryRate: number }
-  | { kind: 'global_accelerator'; activeRegions: number; failedRegions: number; reroutedRps: number };
+  | { kind: 'global_accelerator'; activeRegions: number; failedRegions: number; reroutedRps: number }
+  | { kind: 'api_gateway'; activeRoutes: number; routedRps: number; throttledRps: number; cacheHitRate: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -190,6 +192,12 @@ export interface NodeConfig {
   burstCapacity?: number;       // extra requests allowed in burst window (default 200)
   windowSizeMs?: number;        // window size for window-based algorithms (default 1000)
   maxQueueSize?: number;        // max requests held in queue before dropping (default 500)
+  // API Gateway
+  gatewayRoutes?: Array<{ id: string; path?: string; destNodeId: string; weightPct: number }>;
+  gatewayAuthEnabled?: boolean;      // default false — adds auth overhead latency
+  gatewayAuthOverheadMs?: number;    // default 5 ms
+  gatewayCacheEnabled?: boolean;     // default false — gateway-level response caching
+  gatewayCacheHitPct?: number;       // 0–100, default 30
   // Service Mesh
   mtlsEnabled?: boolean;                               // mutual TLS between services (default true)
   observabilityLevel?: 'none' | 'basic' | 'full';     // telemetry collection level (default 'basic')

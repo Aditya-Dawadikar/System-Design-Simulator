@@ -60,6 +60,7 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   region: 0,             // structural container — no simulation latency
   availability_zone: 0,  // structural container — no simulation latency
   global_accelerator: 5, // anycast edge routing overhead
+  api_gateway: 5,        // request routing and policy evaluation overhead
 };
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,10 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       // High-throughput transparent proxy; load rarely saturates
       return 100000;
 
+    case 'api_gateway':
+      // Regional gateway — high throughput, similar ceiling to load balancer
+      return 50000;
+
     case 'worker_pool': {
       // Throughput = workerCount × threadCount × (1000 / taskDurationMs)
       const workers = config.workerCount ?? 4;
@@ -472,6 +477,43 @@ export function runSimulationTick(
           resolvedEdgeConfigs[eid] = {
             ...(edgeConfigs[eid] ?? { protocol: 'REST', timeoutMs: 5000, retryCount: 2, circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0 }),
             splitPct: normalizedPct,
+          };
+        }
+      }
+    }
+  }
+
+  // ---- 4.55. Resolve API Gateway routing tables into effective edge splitPct overrides ----
+  // For each api_gateway node with gatewayRoutes, override edge splitPct by destNodeId weight.
+  // Deduplication: for duplicate destNodeId entries only the highest weight wins.
+  for (const node of nodes) {
+    if (getNodeType(node) !== 'api_gateway') continue;
+    const gwCfg = nodeConfigs[node.id] ?? {};
+    const routes = gwCfg.gatewayRoutes;
+    if (!routes || routes.length === 0) continue;
+
+    const destMaxWeight = new Map<string, number>();
+    for (const r of routes) {
+      if (!r.destNodeId) continue;
+      const cur = destMaxWeight.get(r.destNodeId) ?? -1;
+      if (r.weightPct > cur) destMaxWeight.set(r.destNodeId, r.weightPct);
+    }
+    if (destMaxWeight.size === 0) continue;
+
+    const totalWeight = Array.from(destMaxWeight.values()).reduce((s, w) => s + w, 0);
+    if (totalWeight === 0) continue;
+
+    const downstreamIds = (adj.downstream.get(node.id) ?? []).filter(
+      (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${node.id}|${tid}`) ?? '')
+    );
+    for (const dsId of downstreamIds) {
+      const weight = destMaxWeight.get(dsId);
+      if (weight !== undefined) {
+        const eid = adj.edgeKey.get(`${node.id}|${dsId}`);
+        if (eid) {
+          resolvedEdgeConfigs[eid] = {
+            ...(edgeConfigs[eid] ?? { protocol: 'REST', timeoutMs: 5000, retryCount: 2, circuitBreaker: false, circuitBreakerThreshold: 50, bandwidthMbps: 0 }),
+            splitPct: (weight / totalWeight) * 100,
           };
         }
       }
@@ -804,6 +846,27 @@ export function runSimulationTick(
           totalZones,
           noZonesAvailable,
         };
+        break;
+      }
+
+      case 'api_gateway': {
+        const authEnabled = config.gatewayAuthEnabled ?? false;
+        const authOverheadMs = authEnabled ? (config.gatewayAuthOverheadMs ?? 5) : 0;
+        const cacheEnabled = config.gatewayCacheEnabled ?? false;
+        const cacheHitRate = cacheEnabled ? (config.gatewayCacheHitPct ?? 30) / 100 : 0;
+
+        const dropRate = computeDropRate(load);
+        // Cache absorbs a fraction of reads; writes always pass through
+        const readRpsOut  = readRpsIn  * (1 - cacheHitRate) * (1 - dropRate);
+        const writeRpsOut = writeRpsIn * (1 - dropRate);
+        rpsOut = readRpsOut + writeRpsOut;
+
+        latencyMs += authOverheadMs;
+
+        const throttledRps = Math.max(0, rpsIn - rpsOut);
+        const activeRoutes = (config.gatewayRoutes ?? []).length;
+
+        detail = { kind: 'api_gateway', activeRoutes, routedRps: rpsOut, throttledRps, cacheHitRate };
         break;
       }
 

@@ -36,6 +36,7 @@ const COMPONENT_CATEGORY: Record<ComponentDefinition['type'], ComponentCategory>
   network_storage: 'Storage',
   cdn: 'Network',
   load_balancer: 'Network',
+  api_gateway: 'Network',
   rate_limiter: 'Network',
   service_mesh: 'Network',
   traffic_generator: 'Scaling',

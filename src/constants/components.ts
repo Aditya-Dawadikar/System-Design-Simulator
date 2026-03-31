@@ -63,6 +63,15 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     defaults: { algorithm: 'round_robin', healthChecks: true, maxConnections: 100000 },
   },
   {
+    type: 'api_gateway',
+    label: 'API Gateway',
+    icon: '⊞',
+    color: '#3b82f6',
+    description: 'Regional — routes traffic to microservices by path/weight (API Gateway)',
+    scope: 'regional',
+    defaults: { gatewayAuthEnabled: false, gatewayAuthOverheadMs: 5, gatewayCacheEnabled: false, gatewayCacheHitPct: 30 },
+  },
+  {
     type: 'cloud_storage',
     label: 'Cloud Storage',
     icon: '◫',
