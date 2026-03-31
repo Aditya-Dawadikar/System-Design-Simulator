@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useArchitectureStore } from '@/store/architectureStore';
@@ -13,6 +13,18 @@ const DIFFICULTY_COLOR: Record<string, string> = {
   intermediate: 'var(--accent-yellow)',
   advanced:     'var(--accent-red)',
 };
+
+function normalizeSearchValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function matchesSearch(searchTerm: string, parts: Array<string | undefined>) {
+  if (!searchTerm) {
+    return true;
+  }
+
+  return parts.some((part) => part?.toLowerCase().includes(searchTerm));
+}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -48,8 +60,37 @@ export default function Dashboard() {
 
   const ARCH_PAGE_SIZE = 3;
   const SCENARIO_PAGE_SIZE = 3;
+  const [searchQuery, setSearchQuery] = useState('');
   const [archVisible, setArchVisible] = useState(ARCH_PAGE_SIZE);
   const [scenarioVisible, setScenarioVisible] = useState(SCENARIO_PAGE_SIZE);
+
+  const searchTerm = normalizeSearchValue(searchQuery);
+
+  const filteredArchitectures = ARCHITECTURE_LIBRARY.filter((entry) =>
+    matchesSearch(searchTerm, [entry.name, entry.description, entry.difficulty, ...entry.tags])
+  );
+
+  const filteredScenarios = SCENARIO_LIBRARY.filter((entry) =>
+    matchesSearch(searchTerm, [
+      entry.name,
+      entry.description,
+      entry.difficulty,
+      ...entry.tags,
+      entry.docs.overview,
+      ...entry.docs.functionalRequirements,
+      ...entry.docs.nonFunctionalRequirements,
+      ...entry.docs.constraints,
+    ])
+  );
+
+  useEffect(() => {
+    setArchVisible(ARCH_PAGE_SIZE);
+    setScenarioVisible(SCENARIO_PAGE_SIZE);
+  }, [searchTerm]);
+
+  const visibleArchitectures = filteredArchitectures.slice(0, archVisible);
+  const visibleScenarios = filteredScenarios.slice(0, scenarioVisible);
+  const hasSearchResults = filteredArchitectures.length > 0 || filteredScenarios.length > 0;
 
   return (
     <div style={{
@@ -136,6 +177,79 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div style={{ marginBottom: 48 }}>
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: '18px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ color: 'var(--text)', fontSize: 12, fontWeight: 700, letterSpacing: 1 }}>
+                  FIND TEMPLATES ACROSS LIBRARIES
+                </div>
+                <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 4 }}>
+                  Search architecture library and real-world scenarios from one input.
+                </div>
+              </div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 10, letterSpacing: 1 }}>
+                {filteredArchitectures.length} architectures · {filteredScenarios.length} scenarios
+              </div>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <span style={{
+                position: 'absolute',
+                left: 12,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--accent-cyan)',
+                fontSize: 13,
+                pointerEvents: 'none',
+              }}>
+                /&gt;
+              </span>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                placeholder="Search by name, tag, difficulty, domain, or requirement"
+                aria-label="Search architecture library and real-world scenarios"
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-base)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text)',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 12,
+                  padding: '12px 14px 12px 40px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {searchTerm && !hasSearchResults && (
+              <div style={{
+                border: '1px solid var(--accent-red)33',
+                background: 'var(--accent-red)0f',
+                color: 'var(--text-dim)',
+                borderRadius: 6,
+                padding: '12px 14px',
+                fontSize: 11,
+                lineHeight: 1.6,
+              }}>
+                No architecture templates or scenarios matched “{searchQuery.trim()}”. Try a component name, domain, or tag.
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Architecture Library */}
         <div>
           <div style={{ marginBottom: 24 }}>
@@ -153,7 +267,7 @@ export default function Dashboard() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 16,
           }}>
-            {ARCHITECTURE_LIBRARY.slice(0, archVisible).map((entry) => (
+            {visibleArchitectures.map((entry) => (
               <ArchitectureCard
                 key={entry.id}
                 entry={entry}
@@ -161,10 +275,13 @@ export default function Dashboard() {
               />
             ))}
           </div>
-          {archVisible < ARCHITECTURE_LIBRARY.length && (
+          {filteredArchitectures.length === 0 && searchTerm && (
+            <EmptyLibraryState label="architectures" accentColor="var(--accent-purple)" />
+          )}
+          {archVisible < filteredArchitectures.length && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
               <button
-                onClick={() => setArchVisible((v) => Math.min(v + ARCH_PAGE_SIZE, ARCHITECTURE_LIBRARY.length))}
+                onClick={() => setArchVisible((v) => Math.min(v + ARCH_PAGE_SIZE, filteredArchitectures.length))}
                 style={{
                   padding: '7px 24px',
                   border: '1px solid var(--border)',
@@ -186,7 +303,7 @@ export default function Dashboard() {
                   (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
                 }}
               >
-                Load more ({ARCHITECTURE_LIBRARY.length - archVisible} remaining)
+                Load more ({filteredArchitectures.length - archVisible} remaining)
               </button>
             </div>
           )}
@@ -209,7 +326,7 @@ export default function Dashboard() {
             gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 16,
           }}>
-            {SCENARIO_LIBRARY.slice(0, scenarioVisible).map((entry) => (
+            {visibleScenarios.map((entry) => (
               <ScenarioCard
                 key={entry.id}
                 entry={entry}
@@ -217,10 +334,13 @@ export default function Dashboard() {
               />
             ))}
           </div>
-          {scenarioVisible < SCENARIO_LIBRARY.length && (
+          {filteredScenarios.length === 0 && searchTerm && (
+            <EmptyLibraryState label="scenarios" accentColor="var(--accent-orange)" />
+          )}
+          {scenarioVisible < filteredScenarios.length && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
               <button
-                onClick={() => setScenarioVisible((v) => Math.min(v + SCENARIO_PAGE_SIZE, SCENARIO_LIBRARY.length))}
+                onClick={() => setScenarioVisible((v) => Math.min(v + SCENARIO_PAGE_SIZE, filteredScenarios.length))}
                 style={{
                   padding: '7px 24px',
                   border: '1px solid var(--border)',
@@ -242,7 +362,7 @@ export default function Dashboard() {
                   (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
                 }}
               >
-                Load more ({SCENARIO_LIBRARY.length - scenarioVisible} remaining)
+                Load more ({filteredScenarios.length - scenarioVisible} remaining)
               </button>
             </div>
           )}
@@ -314,6 +434,22 @@ function PlaygroundCard({ title, subtitle, description, icon, accentColor, onCli
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6 }}>{description}</div>
     </button>
+  );
+}
+
+function EmptyLibraryState({ label, accentColor }: { label: string; accentColor: string }) {
+  return (
+    <div style={{
+      marginTop: 16,
+      padding: '14px 16px',
+      border: `1px dashed ${accentColor}55`,
+      borderRadius: 6,
+      color: 'var(--text-dim)',
+      fontSize: 11,
+      background: 'var(--bg-panel)',
+    }}>
+      No {label} matched the current search.
+    </div>
   );
 }
 
