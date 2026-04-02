@@ -24,6 +24,18 @@ export type ComponentType =
   | 'public_subnet'
   | 'private_subnet';
 
+export type AutoscalingStrategy = 'threshold' | 'target_tracking' | 'scheduled' | 'predictive';
+export type TargetTrackingMetric = 'load' | 'cpu' | 'rps_per_instance';
+
+export interface ScheduledScalingAction {
+  id: string;
+  atTick: number;
+  intervalTicks?: number;
+  desiredInstances?: number;
+  minInstances?: number;
+  maxInstances?: number;
+}
+
 export type RateLimitAlgorithm =
   | 'token_bucket'
   | 'leaky_bucket'
@@ -61,6 +73,8 @@ export type ComponentDetail =
       scalingEvent: 'up-warm' | 'up-cold' | 'down' | null;
       scaleUpCooldown: number;    // ticks remaining before next scale-up allowed
       scaleDownCooldown: number;  // ticks remaining before next scale-down allowed
+      projectedRps?: number;      // predictive only: extrapolated future RPS
+      desiredInstances?: number;  // target_tracking + predictive: computed target count
     }
   | { kind: 'cache';          hitRate: number; evictionRate: number; memoryUsedPct: number }
   | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number }
@@ -129,6 +143,7 @@ export interface NodeConfig {
   workloadType?: WorkloadType;
   // Autoscaling (app_server)
   autoscalingEnabled?: boolean;    // master toggle — default false
+  autoscalingStrategy?: AutoscalingStrategy; // default 'threshold'
   warmPoolEnabled?: boolean;       // warm replica toggle — default false
   minInstances?: number;           // floor — always running
   maxInstances?: number;           // ceiling — never exceed
@@ -138,6 +153,17 @@ export interface NodeConfig {
   scaleUpCooldownTicks?: number;   // ticks between scale-up events   (default 4 = 2 s)
   scaleDownCooldownTicks?: number; // ticks before a scale-in fires   (default 12 = 6 s)
   coldProvisionTicks?: number;     // ticks to provision a cold instance (default 6 = 3 s)
+  // Target Tracking autoscaling
+  targetMetric?: TargetTrackingMetric; // default 'load'
+  targetValue?: number;            // target %; default 70 for load/cpu, 500 for rps_per_instance
+  ttScaleOutCooldownTicks?: number; // default 4 (2 s) — aggressive scale-out
+  ttScaleInCooldownTicks?: number;  // default 24 (12 s) — conservative scale-in
+  // Scheduled autoscaling
+  scheduledActions?: ScheduledScalingAction[];
+  // Predictive autoscaling
+  predictiveLookbackTicks?: number;  // history window for trend detection (default 20)
+  predictiveLookaheadTicks?: number; // how far ahead to pre-provision (default 10)
+  predictiveScalingBuffer?: number;  // % buffer above predicted need (default 20)
   // Cache
   memoryGb?: number;
   ttlSeconds?: number;

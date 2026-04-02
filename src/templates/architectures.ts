@@ -624,20 +624,22 @@ function buildMultiRegion(): ArchitectureTemplate {
   //
   //   Security path (inbound):
   //     GA → LB (public subnet) → Firewall (L4 stateful, 50k RPS) → API GW → App Servers
+  //   App-server autoscaling default in this setup: target tracking.
+  //     Users services track load at ~72%; Orders services at ~75%.
   //
   //   NAT Gateway (public subnet) handles outbound internet traffic from private
   //   subnets. It is not connected to simulation edges — it's a visual anchor
   //   showing where outbound traffic exits the VPC.
   //
-  //   Capacity sizing (active-active N-1 model, 3 000 rps):
-  //     Firewall at 3 000 rps total: ~6 % load (50 000 RPS cap, basic mode)
-  //     Normal (50/50 per region, 1 500 rps each):
-  //       Users per AZ:  30 % × 1 500 = 450 rps → 2 inst × 600 = 37.5 % load
-  //       Orders per AZ: 20 % × 1 500 = 300 rps → 2 inst × 600 = 25 % load
-  //     Failover (one region down, 3 000 rps to survivor):
-  //       Users per AZ:  30 % × 3 000 = 900 rps → 75 % load — STRESSED
-  //       Orders per AZ: 20 % × 3 000 = 600 rps → 50 % load — OK
-  //       Firewall at 3 000 rps: ~6 % load — headroom to spare
+  //   Capacity sizing (active-active N-1 model, 12 000 rps):
+  //     Firewall at 12 000 rps total: ~24 % load (50 000 RPS cap, basic mode)
+  //     Normal (50/50 per region, 6 000 rps each):
+  //       Users per AZ:  30 % × 6 000 = 1 800 rps → 4 inst × 600 = 75 % load
+  //       Orders per AZ: 20 % × 6 000 = 1 200 rps → 3 inst × 600 = 66.7 % load
+  //     Failover (one region down, 12 000 rps to survivor):
+  //       Users per AZ:  30 % × 12 000 = 3 600 rps → 150 % load pre-scale
+  //       Orders per AZ: 20 % × 12 000 = 2 400 rps → 133 % load pre-scale
+  //       Autoscaling and warm pools absorb burst while cold instances provision
   //
   //   Experiment ideas:
   //     • Set Firewall block rate > 0 to simulate a WAF blocking bad traffic
@@ -768,7 +770,7 @@ function buildMultiRegion(): ArchitectureTemplate {
     nodeConfigs: {
       'mr-tgen': makeConfig('traffic_generator', {
         generatorRps:     3000,
-        generatorPattern: 'wave',
+        generatorPattern: 'steady',
         readRatioPct:     65,
       }),
       'mr-cdn': makeConfig('cdn', {
@@ -844,20 +846,34 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:          'Users (east-1a)',
         instances:      4,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    72,
+        minInstances:   4,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   4,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 10,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-east-a',
       }),
       'mr-orders-east-a': makeConfig('app_server', {
         label:          'Orders (east-1a)',
-        instances:      4,
+        instances:      3,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    75,
+        minInstances:   3,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   3,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 12,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-east-a',
@@ -879,20 +895,34 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:          'Users (east-1b)',
         instances:      4,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    72,
+        minInstances:   4,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   4,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 10,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-east-b',
       }),
       'mr-orders-east-b': makeConfig('app_server', {
         label:          'Orders (east-1b)',
-        instances:      4,
+        instances:      3,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    75,
+        minInstances:   3,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   3,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 12,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-east-b',
@@ -901,7 +931,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:        'Primary DB (east-1a)',
         engine:       'PostgreSQL',
         readReplicas: 0,
-        shards:       1,
+        shards:       10,
         rpsPerShard:  1500,
         zoneId:       'mr-az-east-a',
       }),
@@ -909,7 +939,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:        'Read Replica (east-1b)',
         engine:       'PostgreSQL',
         readReplicas: 0,
-        shards:       1,
+        shards:       10,
         rpsPerShard:  1500,
         zoneId:       'mr-az-east-b',
       }),
@@ -983,20 +1013,34 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:          'Users (west-2a)',
         instances:      4,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    72,
+        minInstances:   4,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   4,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 10,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-west-a',
       }),
       'mr-orders-west-a': makeConfig('app_server', {
         label:          'Orders (west-2a)',
-        instances:      2,
+        instances:      3,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    75,
+        minInstances:   3,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   3,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 12,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-west-a',
@@ -1018,20 +1062,34 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:          'Users (west-2b)',
         instances:      4,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    72,
+        minInstances:   4,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 3,
-        maxInstances: 32,
+        warmPoolSize:   4,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 10,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'io_bound',
         zoneId:         'mr-az-west-b',
       }),
       'mr-orders-west-b': makeConfig('app_server', {
         label:          'Orders (west-2b)',
-        instances:      2,
+        instances:      3,
         autoscalingEnabled: true,
+        autoscalingStrategy: 'target_tracking',
+        targetMetric:   'load',
+        targetValue:    75,
+        minInstances:   3,
+        maxInstances:   64,
         warmPoolEnabled: true,
-        warmPoolSize: 1,
-        maxInstances: 32,
+        warmPoolSize:   3,
+        ttScaleOutCooldownTicks: 4,
+        ttScaleInCooldownTicks: 12,
+        coldProvisionTicks: 6,
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-west-b',
@@ -1040,7 +1098,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:        'Read Replica (west-2a)',
         engine:       'PostgreSQL',
         readReplicas: 0,
-        shards:       1,
+        shards:       10,
         rpsPerShard:  1500,
         zoneId:       'mr-az-west-a',
       }),
@@ -1048,7 +1106,7 @@ function buildMultiRegion(): ArchitectureTemplate {
         label:        'Read Replica (west-2b)',
         engine:       'PostgreSQL',
         readReplicas: 0,
-        shards:       1,
+        shards:       10,
         rpsPerShard:  1500,
         zoneId:       'mr-az-west-b',
       }),
@@ -1190,7 +1248,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
   {
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
-    description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). PostgreSQL runs with a single primary in us-east-1a and read replicas in the other three AZs. Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
+    description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). App servers default to target-tracking autoscaling in this setup. PostgreSQL runs with a single primary in us-east-1a and read replicas in the other three AZs. Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
     difficulty: 'advanced',
     tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Firewall', 'NAT Gateway', 'Subnet', 'Microservices', 'Cross-Region', 'Read Replicas', 'Failover'],
     template: buildMultiRegion(),

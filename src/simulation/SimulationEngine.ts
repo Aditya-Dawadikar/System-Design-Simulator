@@ -75,6 +75,21 @@ function getNodeType(node: Node): ComponentType {
   return node.type as ComponentType;
 }
 
+/** Linear regression slope (RPS per tick) over an array of historical values. */
+function linRegSlope(values: number[]): number {
+  const n = values.length;
+  if (n < 2) return 0;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX  += i;
+    sumY  += values[i];
+    sumXY += i * values[i];
+    sumX2 += i * i;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  return denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+}
+
 function formatWarn(msg: string): void {
   // Pure-TS module — use console.warn so it is still visible in dev tools
   // without importing React.
@@ -433,7 +448,8 @@ export function runSimulationTick(
   topology: Topology,
   incomingRps: number,
   tick = 0,
-  previousMetrics: Record<string, NodeMetrics> = {}
+  previousMetrics: Record<string, NodeMetrics> = {},
+  nodeHistory: Record<string, number[]> = {}
 ): {
   nodeMetrics: Record<string, NodeMetrics>;
   edgeMetrics: Record<string, EdgeMetrics>;
@@ -960,14 +976,21 @@ export function runSimulationTick(
           };
         } else {
           // ── Autoscaling FSM path ───────────────────────────────────
-          const minInst         = config.minInstances         ?? (config.instances ?? 2);
-          const maxInst         = config.maxInstances         ?? (config.instances ?? 2) * 4;
+          const strategy        = config.autoscalingStrategy   ?? 'threshold';
+          const minInst         = config.minInstances          ?? (config.instances ?? 2);
+          const maxInst         = config.maxInstances          ?? (config.instances ?? 2) * 4;
           const warmPool        = warmPoolEnabled ? (config.warmPoolSize ?? 0) : 0;
           const scaleUpThr      = config.scaleUpCpuPct          ?? 75;
           const scaleDownThr    = config.scaleDownCpuPct        ?? 25;
-          const scaleUpCDConf   = config.scaleUpCooldownTicks   ?? 4;
-          const scaleDownCDConf = config.scaleDownCooldownTicks ?? 12;
           const coldTicks       = config.coldProvisionTicks     ?? 6;
+
+          // Cooldown defaults: TT uses its own fields; all other strategies share scaleUp/DownCooldownTicks
+          const scaleUpCDConf   = strategy === 'target_tracking'
+            ? (config.ttScaleOutCooldownTicks ?? 4)
+            : (config.scaleUpCooldownTicks    ?? 4);
+          const scaleDownCDConf = strategy === 'target_tracking'
+            ? (config.ttScaleInCooldownTicks  ?? 24)
+            : (config.scaleDownCooldownTicks  ?? 12);
 
           let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
           let pendingInstances  = prevD?.pendingInstances  ?? 0;
@@ -992,31 +1015,145 @@ export function runSimulationTick(
           const effectiveCap = activeInstances * perInstRps;
           const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
           const { cpuPct, memPct } = computeResourcePcts(dynamicLoad);
-
-          // 4. Scaling decision
-          // Use load% (not cpuPct) as the trigger so io_bound and memory_bound
-          // workloads scale correctly — cpuPct for io_bound only reaches ~50 at
-          // full load, which would never cross the 75% threshold.
           const loadPct = dynamicLoad * 100;
-          let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
           const totalProvisioned = activeInstances + pendingInstances;
 
-          if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+          let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
+          let projectedRps: number | undefined;
+          let desiredInstancesDisplay: number | undefined;
+
+          // Helper: provision `delta` new instances — warm pool first, then cold
+          const provisionDelta = (delta: number): void => {
+            if (delta <= 0) return;
             if (warmPoolEnabled && warmReserve > 0) {
-              activeInstances++;
-              warmReserve--;
-              scalingEvent = 'up-warm';
-            } else if (pendingInstances === 0) {
-              pendingInstances = 1;
+              const warmsUsed = Math.min(warmReserve, delta);
+              activeInstances = Math.min(maxInst, activeInstances + warmsUsed);
+              warmReserve    -= warmsUsed;
+              scalingEvent    = 'up-warm';
+              delta          -= warmsUsed;
+            }
+            if (delta > 0 && pendingInstances === 0) {
+              pendingInstances = Math.min(delta, maxInst - activeInstances);
               pendingCountdown = coldTicks;
-              scalingEvent = 'up-cold';
+              if (scalingEvent === null) scalingEvent = 'up-cold';
             }
             scaleUpCooldown = scaleUpCDConf;
-          } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
-            activeInstances--;
-            if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
-            scalingEvent = 'down';
-            scaleDownCooldown = scaleDownCDConf;
+          };
+
+          // 4. Strategy-specific scaling decision
+          if (strategy === 'target_tracking') {
+            // ── Target Tracking: continuously drive toward a desired instance count ──
+            const metric  = config.targetMetric ?? 'load';
+            const targetV = config.targetValue  ?? 70;
+
+            let desired: number;
+            if (metric === 'rps_per_instance') {
+              desired = Math.ceil(rpsIn / Math.max(1, targetV));
+            } else if (metric === 'cpu') {
+              // Invert cpuPct approximation: cpuPct ≈ dynLoad × cpuFactor × 100
+              const cpuFactor = workload === 'cpu_bound' ? 0.97 : workload === 'memory_bound' ? 0.60 : 0.50;
+              const targetLoad = (targetV / 100) / cpuFactor;
+              desired = Math.ceil(rpsIn / Math.max(1, perInstRps * targetLoad));
+            } else {
+              // 'load'
+              desired = Math.ceil(rpsIn / Math.max(1, perInstRps * (targetV / 100)));
+            }
+            desired = Math.min(maxInst, Math.max(minInst, desired));
+            desiredInstancesDisplay = desired;
+
+            if (desired > totalProvisioned && scaleUpCooldown === 0) {
+              provisionDelta(desired - totalProvisioned);
+            } else if (desired < activeInstances && scaleDownCooldown === 0) {
+              const newActive = Math.max(minInst, desired);
+              if (warmPoolEnabled && warmPool > 0) warmReserve = Math.min(warmPool, warmReserve + (activeInstances - newActive));
+              activeInstances   = newActive;
+              scalingEvent      = 'down';
+              scaleDownCooldown = scaleDownCDConf;
+            }
+
+          } else if (strategy === 'scheduled') {
+            // ── Scheduled: fire pre-configured capacity changes at specific ticks ──
+            const actions = config.scheduledActions ?? [];
+            for (const action of actions) {
+              let fires = false;
+              if (action.intervalTicks && action.intervalTicks > 0) {
+                fires = tick >= action.atTick && (tick - action.atTick) % action.intervalTicks === 0;
+              } else {
+                fires = tick === action.atTick;
+              }
+              if (!fires) continue;
+
+              const effMin = action.minInstances ?? minInst;
+              const effMax = action.maxInstances ?? maxInst;
+              if (action.desiredInstances !== undefined) {
+                const target = Math.min(effMax, Math.max(effMin, action.desiredInstances));
+                if (target > activeInstances) {
+                  pendingInstances = 0; // cancel any in-flight cold start
+                  pendingCountdown = 0;
+                  activeInstances  = target;
+                  scalingEvent     = 'up-warm'; // instant — models pre-provisioned capacity
+                } else if (target < activeInstances) {
+                  activeInstances = target;
+                  scalingEvent    = 'down';
+                }
+              }
+              // Scheduled actions bypass cooldowns; reset so reactive fallback fires next tick
+              scaleUpCooldown   = 0;
+              scaleDownCooldown = 0;
+            }
+
+            // Threshold fallback: reactive safety net after scheduled actions
+            if (scalingEvent === null) {
+              if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+                provisionDelta(1);
+              } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+                activeInstances--;
+                if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
+                scalingEvent      = 'down';
+                scaleDownCooldown = scaleDownCDConf;
+              }
+            }
+
+          } else if (strategy === 'predictive') {
+            // ── Predictive: extrapolate load trend and pre-provision ahead of arrival ──
+            const lookback    = config.predictiveLookbackTicks  ?? 20;
+            const lookahead   = config.predictiveLookaheadTicks ?? 10;
+            const buffer      = (config.predictiveScalingBuffer ?? 20) / 100;
+            const hist        = nodeHistory[node.id] ?? [];
+            const minRequired = Math.ceil(lookback / 2);
+
+            if (hist.length >= minRequired) {
+              const window  = hist.slice(-lookback);
+              const slope   = linRegSlope(window);
+              projectedRps  = Math.max(0, rpsIn + slope * lookahead);
+              const desired = Math.min(maxInst, Math.max(minInst,
+                Math.ceil(projectedRps * (1 + buffer) / Math.max(1, perInstRps))
+              ));
+              desiredInstancesDisplay = desired;
+
+              if (desired > totalProvisioned && scaleUpCooldown === 0) {
+                provisionDelta(desired - totalProvisioned);
+              }
+            }
+
+            // Scale in reactively — never predict scale-in to avoid thrashing
+            if (scalingEvent === null && loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+              activeInstances--;
+              if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
+              scalingEvent      = 'down';
+              scaleDownCooldown = scaleDownCDConf;
+            }
+
+          } else {
+            // ── Threshold (default): scale on load% crossing fixed thresholds ──
+            if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
+              provisionDelta(1);
+            } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
+              activeInstances--;
+              if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
+              scalingEvent      = 'down';
+              scaleDownCooldown = scaleDownCDConf;
+            }
           }
 
           // 5. Override load / failed / latency / errorRate
@@ -1031,6 +1168,8 @@ export function runSimulationTick(
             activeInstances, pendingInstances, pendingCountdown,
             warmReserve, scalingEvent,
             scaleUpCooldown, scaleDownCooldown,
+            ...(projectedRps            !== undefined && { projectedRps }),
+            ...(desiredInstancesDisplay !== undefined && { desiredInstances: desiredInstancesDisplay }),
           };
         }
         break;

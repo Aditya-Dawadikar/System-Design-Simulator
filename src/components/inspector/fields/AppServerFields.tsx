@@ -1,6 +1,7 @@
 'use client';
 
 import { useArchitectureStore } from '@/store/architectureStore';
+import type { AutoscalingStrategy, TargetTrackingMetric, ScheduledScalingAction } from '@/types';
 
 const inputStyle: React.CSSProperties = {
   background: 'var(--bg-base)',
@@ -145,9 +146,10 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
   const config = useArchitectureStore((s) => s.nodeConfigs[nodeId] ?? {});
   const updateNodeConfig = useArchitectureStore((s) => s.updateNodeConfig);
 
-  const instances          = config.instances          ?? 2;
-  const autoscalingEnabled = config.autoscalingEnabled ?? false;
-  const warmPoolEnabled    = config.warmPoolEnabled    ?? false;
+  const instances           = config.instances           ?? 2;
+  const autoscalingEnabled  = config.autoscalingEnabled  ?? false;
+  const autoscalingStrategy = config.autoscalingStrategy ?? 'threshold';
+  const warmPoolEnabled     = config.warmPoolEnabled     ?? false;
 
   return (
     <div>
@@ -290,7 +292,22 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
 
         {autoscalingEnabled && (
           <>
-            {/* Min / Max instances */}
+            {/* Strategy selector */}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>Strategy</label>
+              <select
+                value={autoscalingStrategy}
+                onChange={(e) => updateNodeConfig(nodeId, { autoscalingStrategy: e.target.value as AutoscalingStrategy })}
+                style={selectStyle}
+              >
+                <option value="threshold">Threshold — scale on load % crossing</option>
+                <option value="target_tracking">Target Tracking — maintain a target metric</option>
+                <option value="scheduled">Scheduled — capacity changes at set ticks</option>
+                <option value="predictive">Predictive — pre-provision ahead of load</option>
+              </select>
+            </div>
+
+            {/* Min / Max instances — shared by all strategies */}
             <div style={fieldStyle}>
               <label style={labelStyle}>Instance Range (min → max)</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -314,56 +331,296 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
               </div>
             </div>
 
-            {/* Scale-up threshold */}
-            <div style={fieldStyle}>
-              <label style={labelStyle}>Scale-Up CPU Threshold (%)</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <input
-                  type="range"
-                  min={50}
-                  max={95}
-                  value={config.scaleUpCpuPct ?? 75}
-                  onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
-                  style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }}
-                />
-                <input
-                  type="number"
-                  min={50}
-                  max={95}
-                  value={config.scaleUpCpuPct ?? 75}
-                  onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
-                  style={numInputStyle('var(--accent-green)')}
-                />
-              </div>
-            </div>
+            {/* ── Threshold controls ── */}
+            {autoscalingStrategy === 'threshold' && (
+              <>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Scale-Up Load Threshold (%)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={50} max={95} value={config.scaleUpCpuPct ?? 75}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }} />
+                    <input type="number" min={50} max={95} value={config.scaleUpCpuPct ?? 75}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-green)')} />
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Scale-Down Load Threshold (%)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={5} max={50} value={config.scaleDownCpuPct ?? 25}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleDownCpuPct: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }} />
+                    <input type="number" min={5} max={50} value={config.scaleDownCpuPct ?? 25}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleDownCpuPct: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-cyan)')} />
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* Cold provision time */}
-            <div style={fieldStyle}>
-              <label style={labelStyle}>
-                Cold Provision Time&nbsp;
-                <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
-                  ({((config.coldProvisionTicks ?? 6) * 0.5).toFixed(1)} s)
-                </span>
-              </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  value={config.coldProvisionTicks ?? 6}
-                  onChange={(e) => updateNodeConfig(nodeId, { coldProvisionTicks: Number(e.target.value) })}
-                  style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }}
-                />
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={config.coldProvisionTicks ?? 6}
-                  onChange={(e) => updateNodeConfig(nodeId, { coldProvisionTicks: Number(e.target.value) })}
-                  style={numInputStyle('var(--accent-green)')}
-                />
+            {/* ── Target Tracking controls ── */}
+            {autoscalingStrategy === 'target_tracking' && (
+              <>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Target Metric</label>
+                  <select
+                    value={config.targetMetric ?? 'load'}
+                    onChange={(e) => updateNodeConfig(nodeId, { targetMetric: e.target.value as TargetTrackingMetric })}
+                    style={selectStyle}
+                  >
+                    <option value="load">Load % — fraction of instance capacity</option>
+                    <option value="cpu">CPU % — displayed CPU utilization</option>
+                    <option value="rps_per_instance">RPS per Instance — absolute RPS target</option>
+                  </select>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Target Value&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      {(config.targetMetric ?? 'load') === 'rps_per_instance' ? '(RPS)' : '(%)'}
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {(config.targetMetric ?? 'load') !== 'rps_per_instance' ? (
+                      <>
+                        <input type="range" min={20} max={90} value={config.targetValue ?? 70}
+                          onChange={(e) => updateNodeConfig(nodeId, { targetValue: Number(e.target.value) })}
+                          style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }} />
+                        <input type="number" min={20} max={90} value={config.targetValue ?? 70}
+                          onChange={(e) => updateNodeConfig(nodeId, { targetValue: Number(e.target.value) })}
+                          style={numInputStyle('var(--accent-purple)')} />
+                      </>
+                    ) : (
+                      <input type="number" min={1} placeholder="500"
+                        value={config.targetValue ?? ''}
+                        onChange={(e) => updateNodeConfig(nodeId, { targetValue: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        style={inputStyle} />
+                    )}
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Scale-Out Cooldown&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      ({((config.ttScaleOutCooldownTicks ?? 4) * 0.5).toFixed(1)} s)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={1} max={20} value={config.ttScaleOutCooldownTicks ?? 4}
+                      onChange={(e) => updateNodeConfig(nodeId, { ttScaleOutCooldownTicks: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }} />
+                    <input type="number" min={1} max={20} value={config.ttScaleOutCooldownTicks ?? 4}
+                      onChange={(e) => updateNodeConfig(nodeId, { ttScaleOutCooldownTicks: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-green)')} />
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Scale-In Cooldown&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      ({((config.ttScaleInCooldownTicks ?? 24) * 0.5).toFixed(1)} s)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={4} max={60} value={config.ttScaleInCooldownTicks ?? 24}
+                      onChange={(e) => updateNodeConfig(nodeId, { ttScaleInCooldownTicks: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }} />
+                    <input type="number" min={4} max={60} value={config.ttScaleInCooldownTicks ?? 24}
+                      onChange={(e) => updateNodeConfig(nodeId, { ttScaleInCooldownTicks: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-cyan)')} />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ── Scheduled controls ── */}
+            {autoscalingStrategy === 'scheduled' && (
+              <>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Scheduled Actions</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {(config.scheduledActions ?? []).map((action) => (
+                      <div key={action.id} style={{
+                        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto',
+                        gap: '4px', alignItems: 'center',
+                        padding: '6px', background: 'var(--bg-base)',
+                        border: '1px solid var(--border)', borderRadius: '4px',
+                      }}>
+                        <div>
+                          <div style={{ ...labelStyle, marginBottom: '3px' }}>at tick</div>
+                          <input type="number" min={0} value={action.atTick}
+                            onChange={(e) => {
+                              const updated = (config.scheduledActions ?? []).map((a) =>
+                                a.id === action.id ? { ...a, atTick: Number(e.target.value) } : a
+                              );
+                              updateNodeConfig(nodeId, { scheduledActions: updated });
+                            }}
+                            style={{ ...inputStyle, padding: '3px 5px' }} />
+                        </div>
+                        <div>
+                          <div style={{ ...labelStyle, marginBottom: '3px' }}>repeat every</div>
+                          <input type="number" min={0} placeholder="—"
+                            value={action.intervalTicks ?? ''}
+                            onChange={(e) => {
+                              const updated = (config.scheduledActions ?? []).map((a) =>
+                                a.id === action.id ? { ...a, intervalTicks: e.target.value === '' ? undefined : Number(e.target.value) } : a
+                              );
+                              updateNodeConfig(nodeId, { scheduledActions: updated });
+                            }}
+                            style={{ ...inputStyle, padding: '3px 5px' }} />
+                        </div>
+                        <div>
+                          <div style={{ ...labelStyle, marginBottom: '3px' }}>desired inst</div>
+                          <input type="number" min={1} placeholder="—"
+                            value={action.desiredInstances ?? ''}
+                            onChange={(e) => {
+                              const updated = (config.scheduledActions ?? []).map((a) =>
+                                a.id === action.id ? { ...a, desiredInstances: e.target.value === '' ? undefined : Number(e.target.value) } : a
+                              );
+                              updateNodeConfig(nodeId, { scheduledActions: updated });
+                            }}
+                            style={{ ...inputStyle, padding: '3px 5px' }} />
+                        </div>
+                        <button
+                          onClick={() => {
+                            const updated = (config.scheduledActions ?? []).filter((a) => a.id !== action.id);
+                            updateNodeConfig(nodeId, { scheduledActions: updated });
+                          }}
+                          style={{
+                            background: 'none', border: '1px solid var(--border)',
+                            color: 'var(--accent-red)', cursor: 'pointer',
+                            borderRadius: '4px', padding: '2px 6px', fontSize: '11px',
+                            alignSelf: 'flex-end', marginBottom: '1px',
+                          }}
+                        >×</button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const newAction: ScheduledScalingAction = {
+                          id: `sa-${Date.now()}`,
+                          atTick: 0,
+                          desiredInstances: config.minInstances ?? 1,
+                        };
+                        updateNodeConfig(nodeId, { scheduledActions: [...(config.scheduledActions ?? []), newAction] });
+                      }}
+                      style={{
+                        background: 'none', border: '1px dashed var(--border)',
+                        color: 'var(--text-dim)', cursor: 'pointer',
+                        borderRadius: '4px', padding: '5px', fontSize: '10px',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        width: '100%',
+                      }}
+                    >+ add action</button>
+                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '9px', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.5 }}>
+                    Scheduled actions bypass cooldowns. Threshold fallback remains active between actions.
+                  </div>
+                </div>
+                {/* Threshold fallback controls */}
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Fallback Scale-Up Threshold (%)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={50} max={95} value={config.scaleUpCpuPct ?? 75}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }} />
+                    <input type="number" min={50} max={95} value={config.scaleUpCpuPct ?? 75}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleUpCpuPct: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-green)')} />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ── Predictive controls ── */}
+            {autoscalingStrategy === 'predictive' && (
+              <>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Lookback Window&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      ({((config.predictiveLookbackTicks ?? 20) * 0.5).toFixed(0)} s history)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={4} max={40} value={config.predictiveLookbackTicks ?? 20}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveLookbackTicks: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }} />
+                    <input type="number" min={4} max={40} value={config.predictiveLookbackTicks ?? 20}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveLookbackTicks: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-purple)')} />
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Lookahead Horizon&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      ({((config.predictiveLookaheadTicks ?? 10) * 0.5).toFixed(0)} s ahead — should be ≥ cold provision time)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={2} max={30} value={config.predictiveLookaheadTicks ?? 10}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveLookaheadTicks: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }} />
+                    <input type="number" min={2} max={30} value={config.predictiveLookaheadTicks ?? 10}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveLookaheadTicks: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-purple)')} />
+                  </div>
+                </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>
+                    Capacity Buffer&nbsp;
+                    <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                      ({config.predictiveScalingBuffer ?? 20}% above predicted need)
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={0} max={80} value={config.predictiveScalingBuffer ?? 20}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveScalingBuffer: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-purple)', cursor: 'pointer' }} />
+                    <input type="number" min={0} max={80} value={config.predictiveScalingBuffer ?? 20}
+                      onChange={(e) => updateNodeConfig(nodeId, { predictiveScalingBuffer: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-purple)')} />
+                  </div>
+                </div>
+                {/* Scale-in is always reactive — expose threshold */}
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Scale-Down Threshold (%) <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>— reactive</span></label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min={5} max={50} value={config.scaleDownCpuPct ?? 25}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleDownCpuPct: Number(e.target.value) })}
+                      style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }} />
+                    <input type="number" min={5} max={50} value={config.scaleDownCpuPct ?? 25}
+                      onChange={(e) => updateNodeConfig(nodeId, { scaleDownCpuPct: Number(e.target.value) })}
+                      style={numInputStyle('var(--accent-cyan)')} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '9px', color: 'var(--text-dim)', fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.5, marginBottom: '10px' }}>
+                  Scale-out uses linear trend extrapolation. Scale-in is always reactive. Needs {Math.ceil((config.predictiveLookbackTicks ?? 20) / 2)} ticks of history to activate.
+                </div>
+              </>
+            )}
+
+            {/* Cold provision time — shared by threshold / scheduled / predictive */}
+            {autoscalingStrategy !== 'target_tracking' && (
+              <div style={fieldStyle}>
+                <label style={labelStyle}>
+                  Cold Provision Time&nbsp;
+                  <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                    ({((config.coldProvisionTicks ?? 6) * 0.5).toFixed(1)} s)
+                  </span>
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input type="range" min={1} max={20} value={config.coldProvisionTicks ?? 6}
+                    onChange={(e) => updateNodeConfig(nodeId, { coldProvisionTicks: Number(e.target.value) })}
+                    style={{ flex: 1, accentColor: 'var(--accent-green)', cursor: 'pointer' }} />
+                  <input type="number" min={1} max={20} value={config.coldProvisionTicks ?? 6}
+                    onChange={(e) => updateNodeConfig(nodeId, { coldProvisionTicks: Number(e.target.value) })}
+                    style={numInputStyle('var(--accent-green)')} />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* ── Warm Pool ──────────────────────────────────────── */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginTop: '4px' }}>
