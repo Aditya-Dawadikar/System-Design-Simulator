@@ -55,7 +55,8 @@ This file reflects the current codebase state. It replaces the older component l
 
 ## High Priority Next Work
 
-- [ ] Define autoscaling strategy modes and behavior contracts: Target Tracking, Scheduled, and Predictive (inputs, trigger logic, cooldown interaction, and UI controls).
+- [x] Define autoscaling strategy modes and behavior contracts: Target Tracking, Scheduled, and Predictive (inputs, trigger logic, cooldown interaction, and UI controls).
+- [ ] Make target-tracking autoscaling transitions non-instantaneous: model realistic scale-up and scale-down propagation delays so capacity and load changes take effect over time, not in the same tick.
 - [ ] Build a resource "Controller" UI for bulk multi-region/multi-zone management (Terraform-style UX): define a service by type once (for example, "Orders"), choose region and AZ span, and configure shared min/max node or resource counts that fan out to all generated instances. Phase 1 scope: manage app servers, storage types, and compute nodes; add other managers later.
 - [ ] Enforce app server active-standby warm-capacity invariants: always maintain configured warm node count, and guarantee `activeInstances + warmReserve <= maxInstances` during scale-up, scale-down, and warm-pool refill.
 - [ ] Enforce primary-only write routing for databases: all write traffic must route to the configured Primary DB (regardless of its zone), and in multi-region topologies all writes must always go to that primary while replicas remain read-only targets.
