@@ -308,6 +308,14 @@ function ComponentDetailRow({ detail }: { detail: ComponentDetail }) {
       a = { label: 'UTIL',    value: fmtPct(detail.workerUtilization), alert: detail.workerUtilization > 90 };
       b = { label: 'BACKLOG', value: fmtMs(detail.taskBacklogMs),       alert: detail.taskBacklogMs > 1000 };
       break;
+    case 'nat_gateway':
+      a = { label: 'CONNS', value: fmtRps(detail.translatedConnections) };
+      b = { label: 'BW',    value: fmtPct(detail.bandwidthUtilizationPct), alert: detail.bandwidthUtilizationPct > 80 };
+      break;
+    case 'firewall':
+      a = { label: 'ALLOW', value: `${fmtRps(detail.allowedRps)}/s` };
+      b = { label: 'BLOCK', value: `${fmtRps(detail.blockedRps)}/s`, alert: detail.blockedRps > 0 };
+      break;
     default:
       return null;
   }

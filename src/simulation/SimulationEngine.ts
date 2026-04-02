@@ -61,6 +61,10 @@ const BASE_LATENCY: Record<ComponentType, number> = {
   availability_zone: 0,  // structural container — no simulation latency
   global_accelerator: 5, // anycast edge routing overhead
   api_gateway: 5,        // request routing and policy evaluation overhead
+  nat_gateway: 3,        // connection tracking and address translation overhead
+  firewall: 2,           // overridden by inspection mode (basic=2, deep=10)
+  public_subnet: 0,      // visual container — no simulation latency
+  private_subnet: 0,     // visual container — no simulation latency
 };
 
 // ---------------------------------------------------------------------------
@@ -257,10 +261,22 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       return Number.MAX_SAFE_INTEGER;
     }
 
+    case 'nat_gateway':
+      // Bandwidth-limited: 5000 RPS per Gbps of configured bandwidth
+      return Math.round((config.natBandwidthGbps ?? 10) * 5000);
+
+    case 'firewall': {
+      // Deep inspection reduces throughput significantly vs. basic L4 filtering
+      const mode = config.firewallInspectionMode ?? 'basic';
+      return mode === 'deep' ? 10000 : 50000;
+    }
+
     case 'comment':
     case 'traffic_generator':
     case 'region':
     case 'availability_zone':
+    case 'public_subnet':
+    case 'private_subnet':
       // Annotation / pure-source / structural container nodes — never get overloaded
       return Number.MAX_SAFE_INTEGER;
 
@@ -312,6 +328,7 @@ function computeBaseLatency(type: ComponentType, config: NodeConfig): number {
     return protoLatency[config.nfsProtocol ?? 'nfs'] ?? 5;
   }
   if (type === 'service_mesh') return config.proxyOverheadMs ?? 2;
+  if (type === 'firewall') return config.firewallInspectionMode === 'deep' ? 10 : 2;
   return BASE_LATENCY[type] ?? 10;
 }
 
@@ -1353,8 +1370,40 @@ export function runSimulationTick(
         break;
       }
 
+      case 'nat_gateway': {
+        const natBwGbps  = config.natBandwidthGbps ?? 10;
+        const maxConns   = config.maxConnections   ?? 55000;
+        const dropRate   = computeDropRate(load);
+        rpsOut = rpsIn * (1 - dropRate);
+        // Connection tracking: ~0.1 connections open per RPS unit (100ms avg duration)
+        const translatedConnections  = Math.min(maxConns, Math.round(rpsIn * 0.1));
+        const bandwidthUtilizationPct = Math.min(100, (rpsIn / (natBwGbps * 5000)) * 100);
+        const droppedPackets = Math.round(Math.max(0, rpsIn - capacity) * dropRate);
+        detail = { kind: 'nat_gateway', translatedConnections, bandwidthUtilizationPct, droppedPackets };
+        break;
+      }
+
+      case 'firewall': {
+        const blockRatePct = config.firewallBlockRatePct ?? 0;
+        const blockRate    = blockRatePct / 100;
+        const blockedRps   = rpsIn * blockRate;
+        const passedRps    = rpsIn - blockedRps;
+        const dropRate     = computeDropRate(load);
+        rpsOut = passedRps * (1 - dropRate);
+        // Rule coverage: each rule handles up to 5% of traffic patterns, capped at 100%
+        const rules       = config.firewallRules ?? 10;
+        const ruleMatchRate = Math.min(1, rules * 0.05);
+        // Error rate combines blocked traffic and capacity overload errors
+        errorRate = Math.min(1, blockRate + computeErrorRate(load) * (1 - blockRate));
+        const allowedRps = rpsOut;
+        detail = { kind: 'firewall', allowedRps, blockedRps, ruleMatchRate };
+        break;
+      }
+
       case 'region':
-      case 'availability_zone': {
+      case 'availability_zone':
+      case 'public_subnet':
+      case 'private_subnet': {
         // Structural container nodes — transparent pass-through with no simulation effect
         rpsOut = rpsIn;
         load = 0;

@@ -18,7 +18,11 @@ export type ComponentType =
   | 'service_mesh'
   | 'region'
   | 'availability_zone'
-  | 'global_accelerator';
+  | 'global_accelerator'
+  | 'nat_gateway'
+  | 'firewall'
+  | 'public_subnet'
+  | 'private_subnet';
 
 export type RateLimitAlgorithm =
   | 'token_bucket'
@@ -70,7 +74,9 @@ export type ComponentDetail =
   | { kind: 'rate_limiter';  allowedRps: number; throttledRps: number; throttleRate: number; queueDepth: number }
   | { kind: 'service_mesh'; activeConnections: number; mtlsHandshakeRate: number; circuitBroken: boolean; retryRate: number }
   | { kind: 'global_accelerator'; activeRegions: number; failedRegions: number; reroutedRps: number }
-  | { kind: 'api_gateway'; activeRoutes: number; routedRps: number; throttledRps: number; cacheHitRate: number };
+  | { kind: 'api_gateway'; activeRoutes: number; routedRps: number; throttledRps: number; cacheHitRate: number }
+  | { kind: 'nat_gateway'; translatedConnections: number; bandwidthUtilizationPct: number; droppedPackets: number }
+  | { kind: 'firewall'; allowedRps: number; blockedRps: number; ruleMatchRate: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -206,6 +212,14 @@ export interface NodeConfig {
   meshCircuitBreakerEnabled?: boolean;                 // trip on high error rate (default false)
   meshCircuitBreakerThreshold?: number;                // error % to trip breaker (default 50)
   meshRoutes?: Array<{ id: string; sourceNodeId: string; destNodeId: string; weightPct: number }>;  // routing table
+  // NAT Gateway
+  natBandwidthGbps?: number;       // throughput capacity in Gbps (default 10)
+  // Firewall
+  firewallRules?: number;          // number of configured rules (default 10)
+  firewallInspectionMode?: 'basic' | 'deep';  // inspection depth (default 'basic')
+  firewallBlockRatePct?: number;   // 0–100 percentage of traffic to block (default 0)
+  // Public / Private Subnet (containers)
+  subnetCidr?: string;             // e.g. '10.0.1.0/24' — display only
 }
 
 export interface EdgeConfig {

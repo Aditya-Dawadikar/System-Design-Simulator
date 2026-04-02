@@ -42,6 +42,10 @@ import RegionNode from './nodes/RegionNode';
 import AvailabilityZoneNode from './nodes/AvailabilityZoneNode';
 import GlobalAcceleratorNode from './nodes/GlobalAcceleratorNode';
 import ApiGatewayNode from './nodes/ApiGatewayNode';
+import NatGatewayNode from './nodes/NatGatewayNode';
+import FirewallNode from './nodes/FirewallNode';
+import PublicSubnetNode from './nodes/PublicSubnetNode';
+import PrivateSubnetNode from './nodes/PrivateSubnetNode';
 import EdgeWire from './EdgeWire';
 
 
@@ -67,6 +71,10 @@ export const nodeTypes: NodeTypes = {
   region: RegionNode,
   availability_zone: AvailabilityZoneNode,
   global_accelerator: GlobalAcceleratorNode,
+  nat_gateway: NatGatewayNode,
+  firewall: FirewallNode,
+  public_subnet: PublicSubnetNode,
+  private_subnet: PrivateSubnetNode,
 };
 
 export const edgeTypes: EdgeTypes = {
@@ -226,8 +234,8 @@ export default function Canvas() {
     ...n,
     selected: n.id === selectedNodeId,
     // Container nodes sit behind all resource nodes and cannot be connected
-    zIndex: n.type === 'region' ? -2 : n.type === 'availability_zone' ? -1 : 0,
-    connectable: n.type !== 'region' && n.type !== 'availability_zone',
+    zIndex: n.type === 'region' ? -2 : (n.type === 'availability_zone' || n.type === 'public_subnet' || n.type === 'private_subnet') ? -1 : 0,
+    connectable: n.type !== 'region' && n.type !== 'availability_zone' && n.type !== 'public_subnet' && n.type !== 'private_subnet',
   }));
 
   return (

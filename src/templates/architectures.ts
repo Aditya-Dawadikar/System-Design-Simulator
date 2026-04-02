@@ -608,105 +608,145 @@ function buildMultiAzHA(): ArchitectureTemplate {
 // ---------------------------------------------------------------------------
 
 function buildMultiRegion(): ArchitectureTemplate {
-  // Layout:
-  //   Global Accelerator (with health-aware failover) distributes traffic
-  //   50/50 across two regional stacks. Each region has a regional LB and
-  //   API Gateway. Both microservices (Users + Orders) are replicated in
-  //   every AZ for full zone redundancy. The gateway routes 60 % to Users
-  //   and 40 % to Orders, split evenly across both AZ replicas (30/30/20/20).
-  //   Cross-region DB replication carries a 75 ms penalty.
+  // Layout (updated to include Firewall, NAT Gateway, and Subnet containers):
   //
   //   Traffic → CDN → Global Accelerator
-  //     ├── us-east-1: LB → GW ─┬─30%→ Users  (east-1a)
-  //     │                        ├─30%→ Users  (east-1b)
-  //     │                        ├─20%→ Orders (east-1a)
-  //     │                        └─20%→ Orders (east-1b)
-  //     └── us-west-2: (same topology)
+  //     ├── us-east-1 (Region)
+  //     │   ├── [Public Subnet]  LB → Firewall → API GW
+  //     │   │                    NAT Gateway (outbound path, no sim edges)
+  //     │   ├── [Private Subnet AZ-a]  Users (east-1a), Orders (east-1a)
+  //     │   ├── [Private Subnet AZ-b]  Users (east-1b), Orders (east-1b)
+  //     │   └── Cache + Primary DB
+  //     └── us-west-2 (same topology, cross-region DB replication)
+  //
+  //   Security path (inbound):
+  //     GA → LB (public subnet) → Firewall (L4 stateful, 50k RPS) → API GW → App Servers
+  //
+  //   NAT Gateway (public subnet) handles outbound internet traffic from private
+  //   subnets. It is not connected to simulation edges — it's a visual anchor
+  //   showing where outbound traffic exits the VPC.
   //
   //   Capacity sizing (active-active N-1 model, 3 000 rps):
+  //     Firewall at 3 000 rps total: ~6 % load (50 000 RPS cap, basic mode)
   //     Normal (50/50 per region, 1 500 rps each):
   //       Users per AZ:  30 % × 1 500 = 450 rps → 2 inst × 600 = 37.5 % load
   //       Orders per AZ: 20 % × 1 500 = 300 rps → 2 inst × 600 = 25 % load
   //     Failover (one region down, 3 000 rps to survivor):
   //       Users per AZ:  30 % × 3 000 = 900 rps → 75 % load — STRESSED
   //       Orders per AZ: 20 % × 3 000 = 600 rps → 50 % load — OK
+  //       Firewall at 3 000 rps: ~6 % load — headroom to spare
   //
-  //   Zone failure: toggle AZ-east-a → ON.
-  //     GW still has Users-east-b + Orders-east-b healthy; traffic re-weights
-  //     to the surviving AZ instances (50/50 split of remaining capacity).
-  //
-  //   Region failure: toggle us-east-1 → ON.
-  //     GA shifts 100 % to us-west-2.
-  //
-  //   Adjust microservice traffic mix:
-  //     Select GW → Route Table → change weights.
+  //   Experiment ideas:
+  //     • Set Firewall block rate > 0 to simulate a WAF blocking bad traffic
+  //     • Switch Firewall to "deep" inspection mode to see latency impact
+  //     • Toggle region failure → GA reroutes; firewall in survivor handles 2× traffic
+  //     • Toggle AZ failure → GW health-checks reroute to surviving AZ
+
+  // ── Coordinate constants ──────────────────────────────────────────────────
+  // Each region block is 940px wide. West region starts 60px to the right of east.
+  const EX = 50;   // east region x
+  const WX = 1050; // west region x  (EX + 940 + 60)
+  const RY = 210;  // region y (both)
+  const RW = 940;  // region width
+  const RH = 1020; // region height
+
+  // Within each region (all coordinates are absolute):
+  // Row 1 – public subnet band (y=235..y=395): LB, Firewall, NAT GW, then GW at boundary
+  // Row 2 – private subnet AZ-a (y=420..y=930): inner AZ container + app servers
+  // Row 2 – private subnet AZ-b (same y range, shifted right)
+  // Row 3 – cache + DB (y=960)
+
+  function eastX(dx: number) { return EX + dx; }
+  function westX(dx: number) { return WX + dx; }
 
   const nodes: Node[] = [
     // ── Global ingress ────────────────────────────────────────────────────
-    makeNode('mr-tgen', 'traffic_generator',  640, -140),
-    makeNode('mr-cdn',  'cdn',                640,  -20),
-    makeNode('mr-ga',   'global_accelerator', 640,  110),
+    makeNode('mr-tgen', 'traffic_generator',  940, -140),
+    makeNode('mr-cdn',  'cdn',                940,  -20),
+    makeNode('mr-ga',   'global_accelerator', 940,  110),
+
     // ── us-east-1 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-east',        'region',            50,  210),
-    makeNode('mr-az-east-a',       'availability_zone', 85,  380),
-    makeNode('mr-az-east-b',       'availability_zone', 390, 380),
-    makeNode('mr-lb-east',         'load_balancer',     290, 258),
-    makeNode('mr-gw-east',         'api_gateway',       290, 345),
-    makeNode('mr-users-east-a',    'app_server',        110, 450),
-    makeNode('mr-orders-east-a',   'app_server',        110, 614),
-    makeNode('mr-users-east-b',    'app_server',        415, 450),
-    makeNode('mr-orders-east-b',   'app_server',        415, 614),
-    makeNode('mr-cache-east',      'cache',             265, 818),
-    makeNode('mr-db-east',         'database',          265, 938),
+    makeNode('mr-reg-east',          'region',          eastX(0),   RY),
+    // Public subnet: contains LB, Firewall, NAT GW
+    makeNode('mr-pub-east',          'public_subnet',   eastX(20),  235),
+    makeNode('mr-lb-east',           'load_balancer',   eastX(40),  268),
+    makeNode('mr-fw-east',           'firewall',        eastX(310), 268),
+    makeNode('mr-nat-east',          'nat_gateway',     eastX(590), 268),
+    // API GW sits at the public/private boundary (regional, no subnet)
+    makeNode('mr-gw-east',           'api_gateway',     eastX(310), 420),
+    // Private subnet AZ-a
+    makeNode('mr-priv-east-a',       'private_subnet',  eastX(20),  468),
+    makeNode('mr-az-east-a',         'availability_zone', eastX(30), 483),
+    makeNode('mr-users-east-a',      'app_server',      eastX(50),  518),
+    makeNode('mr-orders-east-a',     'app_server',      eastX(50),  682),
+    // Private subnet AZ-b
+    makeNode('mr-priv-east-b',       'private_subnet',  eastX(490), 468),
+    makeNode('mr-az-east-b',         'availability_zone', eastX(500), 483),
+    makeNode('mr-users-east-b',      'app_server',      eastX(520), 518),
+    makeNode('mr-orders-east-b',     'app_server',      eastX(520), 682),
+    // Shared data tier
+    makeNode('mr-cache-east',        'cache',           eastX(265), 980),
+    makeNode('mr-db-east',           'database',        eastX(570), 980),
+
     // ── us-west-2 ─────────────────────────────────────────────────────────
-    makeNode('mr-reg-west',        'region',            780, 210),
-    makeNode('mr-az-west-a',       'availability_zone', 815, 380),
-    makeNode('mr-az-west-b',       'availability_zone', 1120, 380),
-    makeNode('mr-lb-west',         'load_balancer',     1020, 258),
-    makeNode('mr-gw-west',         'api_gateway',       1020, 345),
-    makeNode('mr-users-west-a',    'app_server',        840,  450),
-    makeNode('mr-orders-west-a',   'app_server',        840,  614),
-    makeNode('mr-users-west-b',    'app_server',        1145, 450),
-    makeNode('mr-orders-west-b',   'app_server',        1145, 614),
-    makeNode('mr-cache-west',      'cache',             995,  818),
-    makeNode('mr-db-west',         'database',          995,  938),
+    makeNode('mr-reg-west',          'region',          westX(0),   RY),
+    makeNode('mr-pub-west',          'public_subnet',   westX(20),  235),
+    makeNode('mr-lb-west',           'load_balancer',   westX(40),  268),
+    makeNode('mr-fw-west',           'firewall',        westX(310), 268),
+    makeNode('mr-nat-west',          'nat_gateway',     westX(590), 268),
+    makeNode('mr-gw-west',           'api_gateway',     westX(310), 420),
+    makeNode('mr-priv-west-a',       'private_subnet',  westX(20),  468),
+    makeNode('mr-az-west-a',         'availability_zone', westX(30), 483),
+    makeNode('mr-users-west-a',      'app_server',      westX(50),  518),
+    makeNode('mr-orders-west-a',     'app_server',      westX(50),  682),
+    makeNode('mr-priv-west-b',       'private_subnet',  westX(490), 468),
+    makeNode('mr-az-west-b',         'availability_zone', westX(500), 483),
+    makeNode('mr-users-west-b',      'app_server',      westX(520), 518),
+    makeNode('mr-orders-west-b',     'app_server',      westX(520), 682),
+    makeNode('mr-cache-west',        'cache',           westX(265), 980),
+    makeNode('mr-db-west',           'database',        westX(570), 980),
   ];
 
   const edges: Edge[] = [
-    makeEdge('mr-tgen',            'mr-cdn'),
-    makeEdge('mr-cdn',             'mr-ga'),
-    makeEdge('mr-ga',              'mr-lb-east'),            // 50 % to east
-    makeEdge('mr-ga',              'mr-lb-west'),            // 50 % to west
-    // East: LB → GW → 4 service instances (30/30/20/20 via gatewayRoutes)
-    makeEdge('mr-lb-east',         'mr-gw-east'),
-    makeEdge('mr-gw-east',         'mr-users-east-a'),
-    makeEdge('mr-gw-east',         'mr-users-east-b'),
-    makeEdge('mr-gw-east',         'mr-orders-east-a'),
-    makeEdge('mr-gw-east',         'mr-orders-east-b'),
-    makeEdge('mr-users-east-a',    'mr-cache-east'),
-    makeEdge('mr-users-east-a',    'mr-db-east'),
-    makeEdge('mr-users-east-b',    'mr-cache-east'),
-    makeEdge('mr-users-east-b',    'mr-db-east'),
-    makeEdge('mr-orders-east-a',   'mr-cache-east'),
-    makeEdge('mr-orders-east-a',   'mr-db-east'),
-    makeEdge('mr-orders-east-b',   'mr-cache-east'),
-    makeEdge('mr-orders-east-b',   'mr-db-east'),
-    // West: LB → GW → 4 service instances
-    makeEdge('mr-lb-west',         'mr-gw-west'),
-    makeEdge('mr-gw-west',         'mr-users-west-a'),
-    makeEdge('mr-gw-west',         'mr-users-west-b'),
-    makeEdge('mr-gw-west',         'mr-orders-west-a'),
-    makeEdge('mr-gw-west',         'mr-orders-west-b'),
-    makeEdge('mr-users-west-a',    'mr-cache-west'),
-    makeEdge('mr-users-west-a',    'mr-db-west'),
-    makeEdge('mr-users-west-b',    'mr-cache-west'),
-    makeEdge('mr-users-west-b',    'mr-db-west'),
-    makeEdge('mr-orders-west-a',   'mr-cache-west'),
-    makeEdge('mr-orders-west-a',   'mr-db-west'),
-    makeEdge('mr-orders-west-b',   'mr-cache-west'),
-    makeEdge('mr-orders-west-b',   'mr-db-west'),
-    // Cross-region DB replication (+75 ms)
-    makeEdge('mr-db-east',         'mr-db-west'),
+    makeEdge('mr-tgen',          'mr-cdn'),
+    makeEdge('mr-cdn',           'mr-ga'),
+    makeEdge('mr-ga',            'mr-lb-east'),   // 50 % to east
+    makeEdge('mr-ga',            'mr-lb-west'),   // 50 % to west
+
+    // East: LB → Firewall → API GW → 4 app server instances (30/30/20/20)
+    makeEdge('mr-lb-east',       'mr-fw-east'),
+    makeEdge('mr-fw-east',       'mr-gw-east'),
+    makeEdge('mr-gw-east',       'mr-users-east-a'),
+    makeEdge('mr-gw-east',       'mr-users-east-b'),
+    makeEdge('mr-gw-east',       'mr-orders-east-a'),
+    makeEdge('mr-gw-east',       'mr-orders-east-b'),
+    makeEdge('mr-users-east-a',  'mr-cache-east'),
+    makeEdge('mr-users-east-a',  'mr-db-east'),
+    makeEdge('mr-users-east-b',  'mr-cache-east'),
+    makeEdge('mr-users-east-b',  'mr-db-east'),
+    makeEdge('mr-orders-east-a', 'mr-cache-east'),
+    makeEdge('mr-orders-east-a', 'mr-db-east'),
+    makeEdge('mr-orders-east-b', 'mr-cache-east'),
+    makeEdge('mr-orders-east-b', 'mr-db-east'),
+
+    // West: same topology
+    makeEdge('mr-lb-west',       'mr-fw-west'),
+    makeEdge('mr-fw-west',       'mr-gw-west'),
+    makeEdge('mr-gw-west',       'mr-users-west-a'),
+    makeEdge('mr-gw-west',       'mr-users-west-b'),
+    makeEdge('mr-gw-west',       'mr-orders-west-a'),
+    makeEdge('mr-gw-west',       'mr-orders-west-b'),
+    makeEdge('mr-users-west-a',  'mr-cache-west'),
+    makeEdge('mr-users-west-a',  'mr-db-west'),
+    makeEdge('mr-users-west-b',  'mr-cache-west'),
+    makeEdge('mr-users-west-b',  'mr-db-west'),
+    makeEdge('mr-orders-west-a', 'mr-cache-west'),
+    makeEdge('mr-orders-west-a', 'mr-db-west'),
+    makeEdge('mr-orders-west-b', 'mr-cache-west'),
+    makeEdge('mr-orders-west-b', 'mr-db-west'),
+
+    // Cross-region DB replication (+75 ms latency penalty)
+    makeEdge('mr-db-east',       'mr-db-west'),
   ];
 
   return {
@@ -728,32 +768,38 @@ function buildMultiRegion(): ArchitectureTemplate {
         routingPolicy:   'latency',
         failoverEnabled: true,
       }),
+
       // ── East region ──────────────────────────────────────────────────────
       'mr-reg-east': makeConfig('region', {
         regionName:      'us-east-1',
         regionFailed:    false,
-        containerWidth:  700,
-        containerHeight: 860,
+        containerWidth:  RW,
+        containerHeight: RH,
       }),
-      'mr-az-east-a': makeConfig('availability_zone', {
-        zoneName:        'us-east-1a',
-        regionId:        'mr-reg-east',
-        zoneFailed:      false,
-        containerWidth:  280,
-        containerHeight: 420,
-      }),
-      'mr-az-east-b': makeConfig('availability_zone', {
-        zoneName:        'us-east-1b',
-        regionId:        'mr-reg-east',
-        zoneFailed:      false,
-        containerWidth:  280,
-        containerHeight: 420,
+      'mr-pub-east': makeConfig('public_subnet', {
+        label:           'Public Subnet (east)',
+        subnetCidr:      '10.0.0.0/24',
+        containerWidth:  900,
+        containerHeight: 160,
       }),
       'mr-lb-east': makeConfig('load_balancer', {
-        label:        'LB (us-east-1)',
+        label:        'ALB (us-east-1)',
         algorithm:    'least_conn',
         healthChecks: true,
         regionId:     'mr-reg-east',
+      }),
+      'mr-fw-east': makeConfig('firewall', {
+        label:                  'Firewall (east)',
+        firewallRules:          20,
+        firewallInspectionMode: 'basic',
+        firewallBlockRatePct:   0,
+        regionId:               'mr-reg-east',
+      }),
+      'mr-nat-east': makeConfig('nat_gateway', {
+        label:             'NAT GW (east)',
+        natBandwidthGbps:  10,
+        maxConnections:    55000,
+        regionId:          'mr-reg-east',
       }),
       'mr-gw-east': makeConfig('api_gateway', {
         label:               'API GW (us-east-1)',
@@ -768,6 +814,19 @@ function buildMultiRegion(): ArchitectureTemplate {
           { id: 'gwe-r4', path: '/api/orders', destNodeId: 'mr-orders-east-b', weightPct: 20 },
         ],
       }),
+      'mr-priv-east-a': makeConfig('private_subnet', {
+        label:           'Private Subnet (east-1a)',
+        subnetCidr:      '10.0.1.0/24',
+        containerWidth:  430,
+        containerHeight: 510,
+      }),
+      'mr-az-east-a': makeConfig('availability_zone', {
+        zoneName:        'us-east-1a',
+        regionId:        'mr-reg-east',
+        zoneFailed:      false,
+        containerWidth:  410,
+        containerHeight: 490,
+      }),
       'mr-users-east-a': makeConfig('app_server', {
         label:          'Users (east-1a)',
         instances:      2,
@@ -781,6 +840,19 @@ function buildMultiRegion(): ArchitectureTemplate {
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-east-a',
+      }),
+      'mr-priv-east-b': makeConfig('private_subnet', {
+        label:           'Private Subnet (east-1b)',
+        subnetCidr:      '10.0.2.0/24',
+        containerWidth:  430,
+        containerHeight: 510,
+      }),
+      'mr-az-east-b': makeConfig('availability_zone', {
+        zoneName:        'us-east-1b',
+        regionId:        'mr-reg-east',
+        zoneFailed:      false,
+        containerWidth:  410,
+        containerHeight: 490,
       }),
       'mr-users-east-b': makeConfig('app_server', {
         label:          'Users (east-1b)',
@@ -811,32 +883,38 @@ function buildMultiRegion(): ArchitectureTemplate {
         rpsPerShard:  1000,
         regionId:     'mr-reg-east',
       }),
+
       // ── West region ──────────────────────────────────────────────────────
       'mr-reg-west': makeConfig('region', {
         regionName:      'us-west-2',
         regionFailed:    false,
-        containerWidth:  700,
-        containerHeight: 860,
+        containerWidth:  RW,
+        containerHeight: RH,
       }),
-      'mr-az-west-a': makeConfig('availability_zone', {
-        zoneName:        'us-west-2a',
-        regionId:        'mr-reg-west',
-        zoneFailed:      false,
-        containerWidth:  280,
-        containerHeight: 420,
-      }),
-      'mr-az-west-b': makeConfig('availability_zone', {
-        zoneName:        'us-west-2b',
-        regionId:        'mr-reg-west',
-        zoneFailed:      false,
-        containerWidth:  280,
-        containerHeight: 420,
+      'mr-pub-west': makeConfig('public_subnet', {
+        label:           'Public Subnet (west)',
+        subnetCidr:      '10.1.0.0/24',
+        containerWidth:  900,
+        containerHeight: 160,
       }),
       'mr-lb-west': makeConfig('load_balancer', {
-        label:        'LB (us-west-2)',
+        label:        'ALB (us-west-2)',
         algorithm:    'least_conn',
         healthChecks: true,
         regionId:     'mr-reg-west',
+      }),
+      'mr-fw-west': makeConfig('firewall', {
+        label:                  'Firewall (west)',
+        firewallRules:          20,
+        firewallInspectionMode: 'basic',
+        firewallBlockRatePct:   0,
+        regionId:               'mr-reg-west',
+      }),
+      'mr-nat-west': makeConfig('nat_gateway', {
+        label:             'NAT GW (west)',
+        natBandwidthGbps:  10,
+        maxConnections:    55000,
+        regionId:          'mr-reg-west',
       }),
       'mr-gw-west': makeConfig('api_gateway', {
         label:               'API GW (us-west-2)',
@@ -851,6 +929,19 @@ function buildMultiRegion(): ArchitectureTemplate {
           { id: 'gww-r4', path: '/api/orders', destNodeId: 'mr-orders-west-b', weightPct: 20 },
         ],
       }),
+      'mr-priv-west-a': makeConfig('private_subnet', {
+        label:           'Private Subnet (west-2a)',
+        subnetCidr:      '10.1.1.0/24',
+        containerWidth:  430,
+        containerHeight: 510,
+      }),
+      'mr-az-west-a': makeConfig('availability_zone', {
+        zoneName:        'us-west-2a',
+        regionId:        'mr-reg-west',
+        zoneFailed:      false,
+        containerWidth:  410,
+        containerHeight: 490,
+      }),
       'mr-users-west-a': makeConfig('app_server', {
         label:          'Users (west-2a)',
         instances:      2,
@@ -864,6 +955,19 @@ function buildMultiRegion(): ArchitectureTemplate {
         rpsPerInstance: 600,
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-west-a',
+      }),
+      'mr-priv-west-b': makeConfig('private_subnet', {
+        label:           'Private Subnet (west-2b)',
+        subnetCidr:      '10.1.2.0/24',
+        containerWidth:  430,
+        containerHeight: 510,
+      }),
+      'mr-az-west-b': makeConfig('availability_zone', {
+        zoneName:        'us-west-2b',
+        regionId:        'mr-reg-west',
+        zoneFailed:      false,
+        containerWidth:  410,
+        containerHeight: 490,
       }),
       'mr-users-west-b': makeConfig('app_server', {
         label:          'Users (west-2b)',
@@ -897,18 +1001,18 @@ function buildMultiRegion(): ArchitectureTemplate {
     },
     edgeConfigs: {
       ...edgeConfigs(edges),
-      // Global Accelerator: 50 / 50 split across regions (failover overrides this)
-      'mr-ga->mr-lb-east':                { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
-      'mr-ga->mr-lb-west':                { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      // Global Accelerator: 50/50 split across regions (failover overrides this)
+      'mr-ga->mr-lb-east':             { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-ga->mr-lb-west':             { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
       // Gateway routes: 30 % each to users replicas, 20 % each to orders replicas
-      'mr-gw-east->mr-users-east-a':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
-      'mr-gw-east->mr-users-east-b':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
-      'mr-gw-east->mr-orders-east-a':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
-      'mr-gw-east->mr-orders-east-b':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
-      'mr-gw-west->mr-users-west-a':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
-      'mr-gw-west->mr-users-west-b':      { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
-      'mr-gw-west->mr-orders-west-a':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
-      'mr-gw-west->mr-orders-west-b':     { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-east->mr-users-east-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-east->mr-users-east-b':   { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-east->mr-orders-east-a':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-east->mr-orders-east-b':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-west->mr-users-west-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-west->mr-users-west-b':   { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
+      'mr-gw-west->mr-orders-west-a':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      'mr-gw-west->mr-orders-west-b':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
     },
   };
 }
@@ -1001,9 +1105,9 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
   {
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
-    description: 'CDN → Global Accelerator fans traffic 50/50 to us-east-1 and us-west-2. Each region has an API Gateway that routes 60 % to Users Service and 40 % to Orders Service, demonstrating per-microservice traffic shaping. Toggle "Simulate Region Failure" to watch the accelerator shift all traffic to the survivor region.',
+    description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
     difficulty: 'advanced',
-    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Microservices', 'Replication', 'Cross-Region', 'Failover'],
+    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Firewall', 'NAT Gateway', 'Subnet', 'Microservices', 'Cross-Region', 'Failover'],
     template: buildMultiRegion(),
   },
 ];

@@ -64,6 +64,12 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ---
 
+## Current limitations
+
+- **NAT Gateway modeling is partial** — the simulator can compute NAT Gateway metrics when traffic is explicitly routed through NAT nodes, but it does not automatically infer private-subnet egress paths. In the built-in Multi-Region Active-Active template, NAT Gateway nodes are included as visual outbound anchors only and are intentionally not connected to simulation edges.
+
+---
+
 ## Component reference
 
 ### Infrastructure containers

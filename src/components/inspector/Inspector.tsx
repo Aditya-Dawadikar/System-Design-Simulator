@@ -24,6 +24,10 @@ import RegionFields from './fields/RegionFields';
 import AvailabilityZoneFields from './fields/AvailabilityZoneFields';
 import GlobalAcceleratorFields from './fields/GlobalAcceleratorFields';
 import ApiGatewayFields from './fields/ApiGatewayFields';
+import NatGatewayFields from './fields/NatGatewayFields';
+import FirewallFields from './fields/FirewallFields';
+import PublicSubnetFields from './fields/PublicSubnetFields';
+import PrivateSubnetFields from './fields/PrivateSubnetFields';
 import EdgeInspector from './fields/EdgeInspector';
 
 function NodeNameField({ nodeId, label = 'Name' }: { nodeId: string; label?: string }) {
@@ -110,6 +114,14 @@ function NodeFields({ nodeId, type }: { nodeId: string; type: ComponentType }) {
       return <AvailabilityZoneFields nodeId={nodeId} />;
     case 'global_accelerator':
       return <GlobalAcceleratorFields nodeId={nodeId} />;
+    case 'nat_gateway':
+      return <NatGatewayFields nodeId={nodeId} />;
+    case 'firewall':
+      return <FirewallFields nodeId={nodeId} />;
+    case 'public_subnet':
+      return <PublicSubnetFields nodeId={nodeId} />;
+    case 'private_subnet':
+      return <PrivateSubnetFields nodeId={nodeId} />;
     default:
       return null;
   }

@@ -219,6 +219,46 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     scope: 'global',
     defaults: { zoneName: 'us-east-1a', zoneFailed: false, containerWidth: 380, containerHeight: 440 },
   },
+
+  // ── Network Security ──────────────────────────────────────────────────────
+  {
+    type: 'nat_gateway',
+    label: 'NAT Gateway',
+    icon: '⇢',
+    color: '#f97316',
+    description: 'Regional — translates private subnet traffic to the internet (NAT/PAT)',
+    scope: 'regional',
+    defaults: { natBandwidthGbps: 10, maxConnections: 55000 },
+  },
+  {
+    type: 'firewall',
+    label: 'Firewall',
+    icon: '⊟',
+    color: '#ef4444',
+    description: 'Regional — stateful packet inspection and traffic filtering (WAF / NGFW)',
+    scope: 'regional',
+    defaults: { firewallRules: 10, firewallInspectionMode: 'basic', firewallBlockRatePct: 0 },
+  },
+
+  // ── Network Containers ────────────────────────────────────────────────────
+  {
+    type: 'public_subnet',
+    label: 'Public Subnet',
+    icon: '⬤',
+    color: '#4ade80',
+    description: 'Visual container — internet-facing subnet with direct route to IGW',
+    scope: 'global',
+    defaults: { subnetCidr: '10.0.0.0/24', containerWidth: 500, containerHeight: 350 },
+  },
+  {
+    type: 'private_subnet',
+    label: 'Private Subnet',
+    icon: '◯',
+    color: '#94a3b8',
+    description: 'Visual container — internal subnet, outbound traffic routes through NAT',
+    scope: 'global',
+    defaults: { subnetCidr: '10.0.1.0/24', containerWidth: 500, containerHeight: 350 },
+  },
 ];
 
 export const COMPONENT_BY_TYPE: Record<ComponentType, ComponentDefinition> =

@@ -160,6 +160,20 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
         if (d.failedRegions === 0 && prevFailed > 0)
           newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} all endpoints healthy — failover cleared`, nodeId: id });
       }
+      if (d?.kind === 'firewall') {
+        const prevBlocked = pd?.kind === 'firewall' ? pd.blockedRps : 0;
+        if (d.blockedRps > 0 && prevBlocked === 0)
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} blocking ${d.blockedRps.toFixed(0)} rps — rule match rate ${Math.round(d.ruleMatchRate * 100)}%`, nodeId: id });
+        if (d.blockedRps === 0 && prevBlocked > 0)
+          newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} traffic clear — no blocks active`, nodeId: id });
+      }
+      if (d?.kind === 'nat_gateway') {
+        const prevDropped = pd?.kind === 'nat_gateway' ? pd.droppedPackets : 0;
+        if (d.droppedPackets > 0 && prevDropped === 0)
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} dropping ${d.droppedPackets} pkt/s — bandwidth limit reached`, nodeId: id });
+        if (d.droppedPackets === 0 && prevDropped > 0)
+          newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} bandwidth within limits`, nodeId: id });
+      }
     }
 
     set((s) => ({
