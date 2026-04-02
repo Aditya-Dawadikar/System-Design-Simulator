@@ -614,10 +614,13 @@ function buildMultiRegion(): ArchitectureTemplate {
   //     ├── us-east-1 (Region)
   //     │   ├── [Public Subnet]  LB → Firewall → API GW
   //     │   │                    NAT Gateway (outbound path, no sim edges)
-  //     │   ├── [Private Subnet AZ-a]  Users (east-1a), Orders (east-1a)
-  //     │   ├── [Private Subnet AZ-b]  Users (east-1b), Orders (east-1b)
-  //     │   └── Cache + Primary DB
-  //     └── us-west-2 (same topology, cross-region DB replication)
+  //     │   ├── [Private Subnet AZ-a]  Users, Orders, Primary DB
+  //     │   ├── [Private Subnet AZ-b]  Users, Orders, Read Replica
+  //     │   └── Regional Cache
+  //     └── us-west-2
+  //         ├── [Private Subnet AZ-a]  Users, Orders, Read Replica
+  //         ├── [Private Subnet AZ-b]  Users, Orders, Read Replica
+  //         └── Regional Cache
   //
   //   Security path (inbound):
   //     GA → LB (public subnet) → Firewall (L4 stateful, 50k RPS) → API GW → App Servers
@@ -652,9 +655,9 @@ function buildMultiRegion(): ArchitectureTemplate {
 
   // Within each region (all coordinates are absolute):
   // Row 1 – public subnet band (y=235..y=395): LB, Firewall, NAT GW, then GW at boundary
-  // Row 2 – private subnet AZ-a (y=420..y=930): inner AZ container + app servers
+  // Row 2 – private subnet AZ-a (y=420..y=930): inner AZ container + app servers + DB
   // Row 2 – private subnet AZ-b (same y range, shifted right)
-  // Row 3 – cache + DB (y=960)
+  // Row 3 – regional cache nodes (y=960)
 
   function eastX(dx: number) { return EX + dx; }
   function westX(dx: number) { return WX + dx; }
@@ -679,14 +682,15 @@ function buildMultiRegion(): ArchitectureTemplate {
     makeNode('mr-az-east-a',         'availability_zone', eastX(30), 483),
     makeNode('mr-users-east-a',      'app_server',      eastX(50),  518),
     makeNode('mr-orders-east-a',     'app_server',      eastX(50),  682),
+    makeNode('mr-db-east-a',         'database',        eastX(50),  826),
     // Private subnet AZ-b
     makeNode('mr-priv-east-b',       'private_subnet',  eastX(490), 468),
     makeNode('mr-az-east-b',         'availability_zone', eastX(500), 483),
     makeNode('mr-users-east-b',      'app_server',      eastX(520), 518),
     makeNode('mr-orders-east-b',     'app_server',      eastX(520), 682),
-    // Shared data tier
+    makeNode('mr-db-east-b',         'database',        eastX(520), 826),
+    // Shared regional cache
     makeNode('mr-cache-east',        'cache',           eastX(265), 980),
-    makeNode('mr-db-east',           'database',        eastX(570), 980),
 
     // ── us-west-2 ─────────────────────────────────────────────────────────
     makeNode('mr-reg-west',          'region',          westX(0),   RY),
@@ -699,12 +703,13 @@ function buildMultiRegion(): ArchitectureTemplate {
     makeNode('mr-az-west-a',         'availability_zone', westX(30), 483),
     makeNode('mr-users-west-a',      'app_server',      westX(50),  518),
     makeNode('mr-orders-west-a',     'app_server',      westX(50),  682),
+    makeNode('mr-db-west-a',         'database',        westX(50),  826),
     makeNode('mr-priv-west-b',       'private_subnet',  westX(490), 468),
     makeNode('mr-az-west-b',         'availability_zone', westX(500), 483),
     makeNode('mr-users-west-b',      'app_server',      westX(520), 518),
     makeNode('mr-orders-west-b',     'app_server',      westX(520), 682),
+    makeNode('mr-db-west-b',         'database',        westX(520), 826),
     makeNode('mr-cache-west',        'cache',           westX(265), 980),
-    makeNode('mr-db-west',           'database',        westX(570), 980),
   ];
 
   const edges: Edge[] = [
@@ -721,13 +726,15 @@ function buildMultiRegion(): ArchitectureTemplate {
     makeEdge('mr-gw-east',       'mr-orders-east-a'),
     makeEdge('mr-gw-east',       'mr-orders-east-b'),
     makeEdge('mr-users-east-a',  'mr-cache-east'),
-    makeEdge('mr-users-east-a',  'mr-db-east'),
+    makeEdge('mr-users-east-a',  'mr-db-east-a'),
     makeEdge('mr-users-east-b',  'mr-cache-east'),
-    makeEdge('mr-users-east-b',  'mr-db-east'),
+    makeEdge('mr-users-east-b',  'mr-db-east-b'),
+    makeEdge('mr-users-east-b',  'mr-db-east-a'),
     makeEdge('mr-orders-east-a', 'mr-cache-east'),
-    makeEdge('mr-orders-east-a', 'mr-db-east'),
+    makeEdge('mr-orders-east-a', 'mr-db-east-a'),
     makeEdge('mr-orders-east-b', 'mr-cache-east'),
-    makeEdge('mr-orders-east-b', 'mr-db-east'),
+    makeEdge('mr-orders-east-b', 'mr-db-east-b'),
+    makeEdge('mr-orders-east-b', 'mr-db-east-a'),
 
     // West: same topology
     makeEdge('mr-lb-west',       'mr-fw-west'),
@@ -737,16 +744,22 @@ function buildMultiRegion(): ArchitectureTemplate {
     makeEdge('mr-gw-west',       'mr-orders-west-a'),
     makeEdge('mr-gw-west',       'mr-orders-west-b'),
     makeEdge('mr-users-west-a',  'mr-cache-west'),
-    makeEdge('mr-users-west-a',  'mr-db-west'),
+    makeEdge('mr-users-west-a',  'mr-db-west-a'),
+    makeEdge('mr-users-west-a',  'mr-db-east-a'),
     makeEdge('mr-users-west-b',  'mr-cache-west'),
-    makeEdge('mr-users-west-b',  'mr-db-west'),
+    makeEdge('mr-users-west-b',  'mr-db-west-b'),
+    makeEdge('mr-users-west-b',  'mr-db-east-a'),
     makeEdge('mr-orders-west-a', 'mr-cache-west'),
-    makeEdge('mr-orders-west-a', 'mr-db-west'),
+    makeEdge('mr-orders-west-a', 'mr-db-west-a'),
+    makeEdge('mr-orders-west-a', 'mr-db-east-a'),
     makeEdge('mr-orders-west-b', 'mr-cache-west'),
-    makeEdge('mr-orders-west-b', 'mr-db-west'),
+    makeEdge('mr-orders-west-b', 'mr-db-west-b'),
+    makeEdge('mr-orders-west-b', 'mr-db-east-a'),
 
-    // Cross-region DB replication (+75 ms latency penalty)
-    makeEdge('mr-db-east',       'mr-db-west'),
+    // Replication from east primary to all replicas (+2 ms cross-AZ, +75 ms cross-region)
+    makeEdge('mr-db-east-a',     'mr-db-east-b'),
+    makeEdge('mr-db-east-a',     'mr-db-west-a'),
+    makeEdge('mr-db-east-a',     'mr-db-west-b'),
   ];
 
   return {
@@ -868,20 +881,28 @@ function buildMultiRegion(): ArchitectureTemplate {
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-east-b',
       }),
+      'mr-db-east-a': makeConfig('database', {
+        label:        'Primary DB (east-1a)',
+        engine:       'PostgreSQL',
+        readReplicas: 0,
+        shards:       1,
+        rpsPerShard:  1500,
+        zoneId:       'mr-az-east-a',
+      }),
+      'mr-db-east-b': makeConfig('database', {
+        label:        'Read Replica (east-1b)',
+        engine:       'PostgreSQL',
+        readReplicas: 0,
+        shards:       1,
+        rpsPerShard:  1500,
+        zoneId:       'mr-az-east-b',
+      }),
       'mr-cache-east': makeConfig('cache', {
         label:          'Cache (East)',
         memoryGb:       16,
         ttlSeconds:     90,
         evictionPolicy: 'lru',
         regionId:       'mr-reg-east',
-      }),
-      'mr-db-east': makeConfig('database', {
-        label:        'Primary DB (East)',
-        engine:       'PostgreSQL',
-        readReplicas: 1,
-        shards:       2,
-        rpsPerShard:  1000,
-        regionId:     'mr-reg-east',
       }),
 
       // ── West region ──────────────────────────────────────────────────────
@@ -983,20 +1004,28 @@ function buildMultiRegion(): ArchitectureTemplate {
         workloadType:   'cpu_bound',
         zoneId:         'mr-az-west-b',
       }),
+      'mr-db-west-a': makeConfig('database', {
+        label:        'Read Replica (west-2a)',
+        engine:       'PostgreSQL',
+        readReplicas: 0,
+        shards:       1,
+        rpsPerShard:  1500,
+        zoneId:       'mr-az-west-a',
+      }),
+      'mr-db-west-b': makeConfig('database', {
+        label:        'Read Replica (west-2b)',
+        engine:       'PostgreSQL',
+        readReplicas: 0,
+        shards:       1,
+        rpsPerShard:  1500,
+        zoneId:       'mr-az-west-b',
+      }),
       'mr-cache-west': makeConfig('cache', {
         label:          'Cache (West)',
         memoryGb:       16,
         ttlSeconds:     90,
         evictionPolicy: 'lru',
         regionId:       'mr-reg-west',
-      }),
-      'mr-db-west': makeConfig('database', {
-        label:        'Replica DB (West)',
-        engine:       'PostgreSQL',
-        readReplicas: 1,
-        shards:       2,
-        rpsPerShard:  1000,
-        regionId:     'mr-reg-west',
       }),
     },
     edgeConfigs: {
@@ -1013,6 +1042,30 @@ function buildMultiRegion(): ArchitectureTemplate {
       'mr-gw-west->mr-users-west-b':   { ...DEFAULT_EDGE_CONFIG, splitPct: 30 },
       'mr-gw-west->mr-orders-west-a':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
       'mr-gw-west->mr-orders-west-b':  { ...DEFAULT_EDGE_CONFIG, splitPct: 20 },
+      // App servers keep the original 50 % cache share. Replica zones approximate
+      // read-heavy access by sending 32.5 % to the local replica and 17.5 % to the primary.
+      'mr-users-east-a->mr-cache-east':   { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-users-east-a->mr-db-east-a':    { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-orders-east-a->mr-cache-east':  { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-orders-east-a->mr-db-east-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-users-east-b->mr-cache-east':   { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-users-east-b->mr-db-east-b':    { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-users-east-b->mr-db-east-a':    { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
+      'mr-orders-east-b->mr-cache-east':  { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-orders-east-b->mr-db-east-b':   { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-orders-east-b->mr-db-east-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
+      'mr-users-west-a->mr-cache-west':   { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-users-west-a->mr-db-west-a':    { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-users-west-a->mr-db-east-a':    { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
+      'mr-orders-west-a->mr-cache-west':  { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-orders-west-a->mr-db-west-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-orders-west-a->mr-db-east-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
+      'mr-users-west-b->mr-cache-west':   { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-users-west-b->mr-db-west-b':    { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-users-west-b->mr-db-east-a':    { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
+      'mr-orders-west-b->mr-cache-west':  { ...DEFAULT_EDGE_CONFIG, splitPct: 50 },
+      'mr-orders-west-b->mr-db-west-b':   { ...DEFAULT_EDGE_CONFIG, splitPct: 32.5 },
+      'mr-orders-west-b->mr-db-east-a':   { ...DEFAULT_EDGE_CONFIG, splitPct: 17.5 },
     },
   };
 }
@@ -1105,9 +1158,9 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
   {
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
-    description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
+    description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). PostgreSQL runs with a single primary in us-east-1a and read replicas in the other three AZs. Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
     difficulty: 'advanced',
-    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Firewall', 'NAT Gateway', 'Subnet', 'Microservices', 'Cross-Region', 'Failover'],
+    tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Firewall', 'NAT Gateway', 'Subnet', 'Microservices', 'Cross-Region', 'Read Replicas', 'Failover'],
     template: buildMultiRegion(),
   },
 ];
