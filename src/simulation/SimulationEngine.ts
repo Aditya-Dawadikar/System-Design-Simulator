@@ -227,12 +227,14 @@ function computeCapacity(type: ComponentType, config: NodeConfig): number {
       return 100000;
 
     case 'database': {
-      // Total capacity = primary shards (reads+writes) + replicas (reads only)
-      // Used as the "combined" capacity for the base load calculation.
-      const shards = config.shards ?? 1;
+      const shards      = config.shards      ?? 1;
       const rpsPerShard = config.rpsPerShard ?? 800;
-      const readReplicas = config.readReplicas ?? 0;
-      return shards * rpsPerShard + readReplicas * rpsPerShard;
+      const dbRole      = config.dbRole      ?? 'standalone';
+      // Replica: read-only, no virtual replica bonus.
+      // Primary: writes only go here; no virtual readReplicas (actual replicas are separate nodes).
+      // Standalone: legacy mode — virtual readReplicas still count.
+      if (dbRole === 'replica' || dbRole === 'primary') return shards * rpsPerShard;
+      return shards * rpsPerShard + (config.readReplicas ?? 0) * rpsPerShard;
     }
 
     case 'cloud_storage': {
@@ -410,7 +412,8 @@ function computeEdgeShare(
   sourceOut: number,
   adj: AdjacencyMap,
   edgeConfigs: Record<string, EdgeConfig>,
-  cyclingEdgeIds: Set<string>
+  cyclingEdgeIds: Set<string>,
+  trafficKind: 'all' | 'read' | 'write' = 'all'
 ): number {
   const downstreamIds = (adj.downstream.get(sourceId) ?? []).filter(
     (tid) => !cyclingEdgeIds.has(adj.edgeKey.get(`${sourceId}|${tid}`) ?? '')
@@ -423,7 +426,12 @@ function computeEdgeShare(
 
   for (const tid of downstreamIds) {
     const eid = adj.edgeKey.get(`${sourceId}|${tid}`);
-    const splitPct = eid !== undefined ? edgeConfigs[eid]?.splitPct : undefined;
+    const edgeConfig = eid !== undefined ? edgeConfigs[eid] : undefined;
+    const splitPct = trafficKind === 'read'
+      ? edgeConfig?.readSplitPct ?? edgeConfig?.splitPct
+      : trafficKind === 'write'
+      ? edgeConfig?.writeSplitPct ?? edgeConfig?.splitPct
+      : edgeConfig?.splitPct;
     splits[tid] = splitPct;
     if (splitPct !== undefined) {
       definedPctTotal += splitPct;
@@ -739,10 +747,15 @@ export function runSimulationTick(
       let totalBadRpsIn = 0;
       for (const uid of upstreamIds) {
         const upstreamOut = rpsOutMap.get(uid) ?? 0;
-        const share = computeEdgeShare(uid, node.id, upstreamOut, adj, resolvedEdgeConfigs, cyclingEdgeIds);
+        const upstreamReadRatio = readRatioOutMap.get(uid) ?? 0.5;
+        const upstreamReadOut = upstreamOut * upstreamReadRatio;
+        const upstreamWriteOut = upstreamOut * (1 - upstreamReadRatio);
+        const readShare = computeEdgeShare(uid, node.id, upstreamReadOut, adj, resolvedEdgeConfigs, cyclingEdgeIds, 'read');
+        const writeShare = computeEdgeShare(uid, node.id, upstreamWriteOut, adj, resolvedEdgeConfigs, cyclingEdgeIds, 'write');
+        const share = readShare + writeShare;
         rpsIn += share;
-        totalReadRpsIn += share * (readRatioOutMap.get(uid) ?? 0.5);
-        totalBadRpsIn  += share * (badRatioOutMap.get(uid)  ?? 0);
+        totalReadRpsIn += readShare;
+        totalBadRpsIn  += share * (badRatioOutMap.get(uid) ?? 0);
       }
       // Weighted average ratios from upstream contributions
       readRatio = rpsIn > 0 ? totalReadRpsIn / rpsIn : 0.5;
@@ -762,14 +775,25 @@ export function runSimulationTick(
     let writeLoad: number | undefined;
 
     if (type === 'database') {
-      const shards = config.shards ?? 1;
+      const shards      = config.shards      ?? 1;
       const rpsPerShard = config.rpsPerShard ?? 800;
-      const readReplicas = config.readReplicas ?? 0;
-      const writeCapacity = shards * rpsPerShard;                        // primary only
-      const dbReadCapacity = (shards + readReplicas) * rpsPerShard;      // primary + replicas
-      writeLoad = writeCapacity > 0 ? writeRpsIn / writeCapacity : 0;
-      readLoad  = dbReadCapacity > 0 ? readRpsIn  / dbReadCapacity  : 0;
-      load = Math.max(readLoad, writeLoad);
+      const dbRole      = config.dbRole      ?? 'standalone';
+
+      if (dbRole === 'replica') {
+        // Replicas are read-only: writes are not consumed as load — they are errors.
+        const readCapacity = shards * rpsPerShard;
+        readLoad  = readCapacity > 0 ? readRpsIn / readCapacity : 0;
+        writeLoad = 0; // write rejection is handled as errorRate in the tick case
+        load      = readLoad;
+      } else {
+        // primary or standalone
+        const readReplicas   = dbRole === 'standalone' ? (config.readReplicas ?? 0) : 0;
+        const writeCapacity  = shards * rpsPerShard;
+        const dbReadCapacity = (shards + readReplicas) * rpsPerShard;
+        writeLoad = writeCapacity  > 0 ? writeRpsIn / writeCapacity  : 0;
+        readLoad  = dbReadCapacity > 0 ? readRpsIn  / dbReadCapacity : 0;
+        load      = Math.max(readLoad, writeLoad);
+      }
     } else {
       load = capacity > 0 ? rpsIn / capacity : 0;
     }
@@ -1192,20 +1216,49 @@ export function runSimulationTick(
       }
 
       case 'database': {
-        const dropRate = computeDropRate(load);
-        rpsOut = rpsIn * (1 - dropRate);
-        const shards  = config.shards       ?? 1;
-        const replicas = config.readReplicas ?? 0;
-        const poolSizePerNode  = 100; // connections per shard/replica
-        const connectionPoolMax  = (shards + replicas) * poolSizePerNode;
-        // avg 100 ms query → 0.1 connections consumed per rps
-        const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(rpsIn * 0.1));
-        const queryQueueDepth    = Math.max(0, Math.round(rpsIn * 0.1 - connectionPoolMax));
-        // Slow queries: lock contention grows after 60 % load
-        const slowQueryRate = Math.min(0.4, Math.max(0, (load - 0.6) / 0.6) * 0.4);
-        // Pool exhaustion spikes latency
-        if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
-        detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate };
+        const dbRole         = config.dbRole ?? 'standalone';
+        const shards         = config.shards ?? 1;
+        const poolSizePerNode = 100; // connections per shard
+
+        if (dbRole === 'replica') {
+          // ── Read-only replica ──────────────────────────────────────────────
+          // Writes arriving at a replica are rejected immediately (errorRate).
+          const replicaReadLoad = readLoad ?? 0;
+          const connectionPoolMax  = shards * poolSizePerNode;
+          const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(readRpsIn * 0.1));
+          const queryQueueDepth    = Math.max(0, Math.round(readRpsIn * 0.1 - connectionPoolMax));
+          const slowQueryRate      = Math.min(0.4, Math.max(0, (replicaReadLoad - 0.6) / 0.6) * 0.4);
+          if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
+
+          // Replication lag: grows with primary's write load (read from previous tick)
+          const primaryPrev = config.primaryNodeId ? previousMetrics[config.primaryNodeId] : undefined;
+          const primaryWriteLoad = primaryPrev?.writeLoad ?? 0;
+          const replicationLagMs = Math.max(0, (primaryWriteLoad - 0.3) / 0.7 * 500);
+          if (replicationLagMs > 0) latencyMs += replicationLagMs * 0.05; // stale-read overhead
+
+          // Write rejections
+          const writeRejectedRps = writeRpsIn;
+          errorRate = rpsIn > 0 ? writeRpsIn / rpsIn : 0;
+          failed    = replicaReadLoad > 1.05 || writeRpsIn > rpsIn * 0.05;
+
+          const dropRate = computeDropRate(replicaReadLoad);
+          rpsOut = readRpsIn * (1 - dropRate); // reads only pass through
+
+          detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate, replicationLagMs, writeRejectedRps };
+        } else {
+          // ── Primary or Standalone ──────────────────────────────────────────
+          const replicas = dbRole === 'standalone' ? (config.readReplicas ?? 0) : 0;
+          const connectionPoolMax  = (shards + replicas) * poolSizePerNode;
+          const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(rpsIn * 0.1));
+          const queryQueueDepth    = Math.max(0, Math.round(rpsIn * 0.1 - connectionPoolMax));
+          const slowQueryRate      = Math.min(0.4, Math.max(0, (load - 0.6) / 0.6) * 0.4);
+          if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
+
+          const dropRate = computeDropRate(load);
+          rpsOut = rpsIn * (1 - dropRate);
+
+          detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate, replicationLagMs: 0, writeRejectedRps: 0 };
+        }
         break;
       }
 

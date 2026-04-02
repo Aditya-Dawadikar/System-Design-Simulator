@@ -285,8 +285,14 @@ function ComponentDetailRow({ detail }: { detail: ComponentDetail }) {
       b = { label: 'EVICT', value: fmtPct(detail.evictionRate * 100), alert: detail.evictionRate > 0 };
       break;
     case 'database':
-      a = { label: 'POOL',  value: `${detail.connectionPoolUsed}/${detail.connectionPoolMax}`, alert: detail.connectionPoolUsed >= detail.connectionPoolMax };
-      b = { label: 'QUEUE', value: `${detail.queryQueueDepth}`, alert: detail.queryQueueDepth > 0 };
+      a = { label: 'POOL', value: `${detail.connectionPoolUsed}/${detail.connectionPoolMax}`, alert: detail.connectionPoolUsed >= detail.connectionPoolMax };
+      if (detail.writeRejectedRps > 0) {
+        b = { label: 'REJECT', value: `${fmtRps(detail.writeRejectedRps)}/s`, alert: true };
+      } else if (detail.replicationLagMs > 0) {
+        b = { label: 'LAG', value: fmtMs(detail.replicationLagMs), alert: detail.replicationLagMs > 100 };
+      } else {
+        b = { label: 'QUEUE', value: `${detail.queryQueueDepth}`, alert: detail.queryQueueDepth > 0 };
+      }
       break;
     case 'cloud_storage':
       a = { label: 'BW',    value: fmtPct(detail.bandwidthUtilization), alert: detail.bandwidthUtilization > 80 };

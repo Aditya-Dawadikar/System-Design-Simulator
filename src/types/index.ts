@@ -77,7 +77,7 @@ export type ComponentDetail =
       desiredInstances?: number;  // target_tracking + predictive: computed target count
     }
   | { kind: 'cache';          hitRate: number; evictionRate: number; memoryUsedPct: number }
-  | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number }
+  | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number; replicationLagMs: number; writeRejectedRps: number }
   | { kind: 'cloud_storage';  throttledRequests: number; bandwidthUtilization: number }
   | { kind: 'block_storage';  iopsUsed: number; iopsLimit: number; queueDepth: number; throughputMbps: number }
   | { kind: 'network_storage'; activeConnections: number; bandwidthUsedMbps: number; throughputLimitMbps: number }
@@ -176,6 +176,8 @@ export interface NodeConfig {
   shards?: number;
   rpsPerShard?: number;
   engine?: 'PostgreSQL' | 'MySQL' | 'MongoDB' | 'Redis' | 'Cassandra';
+  dbRole?: 'standalone' | 'primary' | 'replica';
+  primaryNodeId?: string;   // replica only: node ID of the primary in this replication group
   // Cloud Storage
   storageThroughputMbps?: number;
   objectSizeKb?: number;
@@ -262,6 +264,8 @@ export interface EdgeConfig {
   circuitBreakerThreshold: number;
   bandwidthMbps: number;
   splitPct?: number; // 0-100; undefined = auto equal-split
+  readSplitPct?: number; // 0-100; optional read-traffic override for this edge
+  writeSplitPct?: number; // 0-100; optional write-traffic override for this edge
 }
 
 export interface LogEvent {
