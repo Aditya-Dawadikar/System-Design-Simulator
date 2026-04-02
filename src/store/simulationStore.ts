@@ -163,7 +163,7 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
       if (d?.kind === 'firewall') {
         const prevBlocked = pd?.kind === 'firewall' ? pd.blockedRps : 0;
         if (d.blockedRps > 0 && prevBlocked === 0)
-          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} blocking ${d.blockedRps.toFixed(0)} rps — rule match rate ${Math.round(d.ruleMatchRate * 100)}%`, nodeId: id });
+          newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} blocking ${d.blockedRps.toFixed(0)} rps — detection efficiency ${Math.round(d.detectionEfficiency * 100)}%`, nodeId: id });
         if (d.blockedRps === 0 && prevBlocked > 0)
           newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} traffic clear — no blocks active`, nodeId: id });
       }

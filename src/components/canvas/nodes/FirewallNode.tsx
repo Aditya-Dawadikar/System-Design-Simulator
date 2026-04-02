@@ -137,13 +137,13 @@ export default memo(function FirewallNode({ id, selected }: NodeProps) {
               </div>
             </div>
             <div>
-              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>LAT</span>
+              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>DETECT</span>
               <div style={{ color: 'var(--accent-cyan)', fontWeight: 600, fontSize: 12 }}>
-                {metrics.latencyMs.toFixed(0)}ms
+                {detail ? `${Math.round(detail.detectionEfficiency * 100)}%` : '–'}
               </div>
             </div>
           </div>
-          {detail && detail.blockedRps > 0 && (
+          {detail && detail.autoDetectedRps > 0 && (
             <div
               style={{
                 marginTop: 6, padding: '3px 7px',
@@ -154,7 +154,23 @@ export default memo(function FirewallNode({ id, selected }: NodeProps) {
             >
               <span style={{ fontSize: 9, color: 'var(--accent-red)' }}>⊟</span>
               <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--accent-red)', letterSpacing: '0.04em' }}>
-                {detail.blockedRps.toFixed(0)} rps blocked ({blockRatePct}%)
+                {detail.autoDetectedRps.toFixed(0)} rps auto-detected
+                {detail.manualBlockedRps > 0 && ` · ${detail.manualBlockedRps.toFixed(0)} manual`}
+              </span>
+            </div>
+          )}
+          {detail && detail.autoDetectedRps === 0 && detail.manualBlockedRps > 0 && (
+            <div
+              style={{
+                marginTop: 6, padding: '3px 7px',
+                background: 'color-mix(in srgb, var(--accent-orange) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent-orange) 35%, transparent)',
+                borderRadius: 4, display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <span style={{ fontSize: 9, color: 'var(--accent-orange)' }}>⊟</span>
+              <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--accent-orange)', letterSpacing: '0.04em' }}>
+                {detail.manualBlockedRps.toFixed(0)} rps blocked (manual rule)
               </span>
             </div>
           )}

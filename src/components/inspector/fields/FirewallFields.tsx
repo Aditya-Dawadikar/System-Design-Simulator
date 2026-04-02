@@ -74,7 +74,7 @@ export default function FirewallFields({ nodeId }: { nodeId: string }) {
       </div>
 
       <div style={fieldStyle}>
-        <label style={labelStyle}>Block Rate — {blockRatePct}%</label>
+        <label style={labelStyle}>Manual Block Rate — {blockRatePct}%</label>
         <input
           type="range"
           min={0}
@@ -110,7 +110,7 @@ export default function FirewallFields({ nodeId }: { nodeId: string }) {
               color: COLOR,
             }}
           >
-            {blockRatePct}% of incoming traffic will be blocked (simulates ACL / WAF rules matching)
+            {blockRatePct}% of traffic blocked by IP blocklist / ACL rules regardless of content
           </div>
         )}
       </div>
@@ -128,8 +128,12 @@ export default function FirewallFields({ nodeId }: { nodeId: string }) {
           lineHeight: 1.7,
         }}
       >
-        Deep inspection adds latency per packet but enables L7 filtering (HTTP, DNS, TLS).
-        Block rate simulates ACL / WAF rules dropping malicious or unauthorised traffic.
+        <strong style={{ color: 'var(--text)' }}>Auto-detection:</strong> bad traffic set on the Traffic Generator
+        is automatically detected based on rule count × inspection mode
+        (basic ≈ 4%/rule, deep ≈ 5%/rule, max 100%). Undetected bad traffic passes through.
+        <br /><br />
+        <strong style={{ color: 'var(--text)' }}>Manual block rate:</strong> additional drop applied on top
+        (e.g., IP blocklists, geo-blocks) — blocks good and bad traffic equally.
       </div>
     </div>
   );

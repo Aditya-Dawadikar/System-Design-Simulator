@@ -31,10 +31,12 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
   const baseRps = config?.generatorRps ?? 1000;
   const pattern = config?.generatorPattern ?? 'steady';
   const readPct = config?.readRatioPct ?? 50;
+  const badPct = config?.badTrafficPct ?? 0;
 
   const liveRps = running && metrics ? metrics.rpsIn : baseRps;
   const readRps = liveRps * readPct / 100;
   const writeRps = liveRps * (100 - readPct) / 100;
+  const badRps = liveRps * badPct / 100;
 
   const boxShadow = selected
     ? `0 0 0 2px ${COLOR}44, 0 0 20px ${COLOR}33`
@@ -114,8 +116,8 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
         </div>
       </div>
 
-      {/* Read / Write split */}
-      <div style={{ padding: '0 12px 8px', display: 'flex', gap: 12 }}>
+      {/* Read / Write / Bad split */}
+      <div style={{ padding: '0 12px 8px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>R </span>
           <span style={{ fontWeight: 600, fontSize: 11, color: '#38bdf8' }}>{fmtRps(readRps)}</span>
@@ -124,7 +126,32 @@ export default memo(function TrafficGeneratorNode({ id, selected }: NodeProps) {
           <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>W </span>
           <span style={{ fontWeight: 600, fontSize: 11, color: '#fb923c' }}>{fmtRps(writeRps)}</span>
         </div>
+        {badPct > 0 && (
+          <div>
+            <span style={{ color: 'var(--text-dim)', fontSize: 9 }}>BAD </span>
+            <span style={{ fontWeight: 600, fontSize: 11, color: '#ef4444' }}>{fmtRps(badRps)}</span>
+          </div>
+        )}
       </div>
+      {badPct > 0 && (
+        <div
+          style={{
+            margin: '0 12px 8px',
+            padding: '2px 7px',
+            background: '#ef444410',
+            border: '1px solid #ef444430',
+            borderRadius: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+          }}
+        >
+          <span style={{ fontSize: 9, color: '#ef4444' }}>⊟</span>
+          <span style={{ fontSize: 9, fontWeight: 600, color: '#ef4444', letterSpacing: '0.04em' }}>
+            {badPct}% malicious traffic
+          </span>
+        </div>
+      )}
 
       <NodeLocationBadge nodeId={id} />
       <Handle

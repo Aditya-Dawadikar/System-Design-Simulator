@@ -164,6 +164,48 @@ export default function TrafficGeneratorFields({ nodeId }: TrafficGeneratorField
         </div>
       </div>
 
+      {/* Bad traffic */}
+      <div style={fieldStyle}>
+        <label style={labelStyle}>
+          Bad Traffic — {config.badTrafficPct ?? 0}%
+          {(config.badTrafficPct ?? 0) > 0 && (
+            <span style={{ marginLeft: 8, color: '#ef4444', fontWeight: 500 }}>
+              {Math.round((config.generatorRps ?? 1000) * (config.badTrafficPct ?? 0) / 100).toLocaleString()} rps malicious
+            </span>
+          )}
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={80}
+          step={5}
+          value={config.badTrafficPct ?? 0}
+          onChange={(e) => updateNodeConfig(nodeId, { badTrafficPct: Number(e.target.value) })}
+          style={{ width: '100%', accentColor: '#ef4444', cursor: 'pointer' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: "'JetBrains Mono', monospace", fontSize: '9px', color: 'var(--text-dim)', marginTop: 3 }}>
+          <span>0% (clean)</span>
+          <span>80% (attack)</span>
+        </div>
+        {(config.badTrafficPct ?? 0) > 0 && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: '6px 10px',
+              background: '#ef444410',
+              border: '1px solid #ef444430',
+              borderRadius: 4,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '9px',
+              color: '#ef4444',
+              lineHeight: 1.6,
+            }}
+          >
+            {(config.badTrafficPct ?? 0)}% of traffic is malicious. A Firewall downstream will auto-detect and drop it based on its rule count and inspection mode.
+          </div>
+        )}
+      </div>
+
       <div
         style={{
           fontFamily: "'JetBrains Mono', monospace",

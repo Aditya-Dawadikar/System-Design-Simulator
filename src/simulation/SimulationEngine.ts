@@ -459,6 +459,10 @@ export function runSimulationTick(
   // Propagated from traffic_generator config downstream through the graph.
   const readRatioOutMap = new Map<string, number>();
 
+  // ---- 4.1 Track bad traffic ratio per node (fraction of rpsOut that is malicious) ----
+  // Set by traffic_generator.badTrafficPct, propagated downstream, scrubbed by firewall.
+  const badRatioOutMap = new Map<string, number>();
+
   // ---- 4.5. Resolve service mesh routing tables into effective edge splitPct overrides ----
   // For each service_mesh node with meshRoutes, match route destNodeId to downstream node IDs
   // and override the edge's splitPct so the BFS distributes traffic accordingly.
@@ -671,9 +675,10 @@ export function runSimulationTick(
     const type = getNodeType(node);
     const config = nodeConfigs[node.id] ?? {};
 
-    // Determine rpsIn and readRatio
+    // Determine rpsIn, readRatio, and badRatio
     let rpsIn: number;
     let readRatio: number; // fraction of rpsIn that is read traffic
+    let badRatio: number;  // fraction of rpsIn that is malicious traffic
 
     if (type === 'cron_job') {
       // Schedule-driven: emits at a fixed rate regardless of global incomingRps.
@@ -681,16 +686,19 @@ export function runSimulationTick(
       const intervalSec = (config.intervalMinutes ?? 5) * 60;
       rpsIn = tasksPerRun / intervalSec;
       readRatio = 0.5; // cron tasks are assumed balanced
+      badRatio = 0;
     } else if (type === 'traffic_generator') {
       // Each traffic generator has its own configurable RPS + pattern.
       const baseRps = config.generatorRps ?? 1000;
       const pattern = config.generatorPattern ?? 'steady';
       rpsIn = baseRps * getTrafficMultiplier(pattern, tick);
       readRatio = (config.readRatioPct ?? 50) / 100;
+      badRatio = (config.badTrafficPct ?? 0) / 100;
     } else if (sourceIdSet.has(node.id)) {
       // Other unconnected source nodes receive the global incoming RPS.
       rpsIn = incomingRps;
       readRatio = 0.5;
+      badRatio = 0;
     } else {
       // Sum contributions from all upstream nodes, respecting edge splitPct.
       const upstreamIds = (adj.upstream.get(node.id) ?? []).filter(
@@ -702,26 +710,32 @@ export function runSimulationTick(
           rpsIn: 0, rpsOut: 0, load: 0,
           latencyMs: 0, p99LatencyMs: 0, errorRate: 0, failed: false,
           readRatio: 0.5, readRpsIn: 0, writeRpsIn: 0,
+          badRatio: 0, badRpsIn: 0,
         };
         rpsOutMap.set(node.id, 0);
         readRatioOutMap.set(node.id, 0.5);
+        badRatioOutMap.set(node.id, 0);
         continue;
       }
 
       rpsIn = 0;
       let totalReadRpsIn = 0;
+      let totalBadRpsIn = 0;
       for (const uid of upstreamIds) {
         const upstreamOut = rpsOutMap.get(uid) ?? 0;
         const share = computeEdgeShare(uid, node.id, upstreamOut, adj, resolvedEdgeConfigs, cyclingEdgeIds);
         rpsIn += share;
         totalReadRpsIn += share * (readRatioOutMap.get(uid) ?? 0.5);
+        totalBadRpsIn  += share * (badRatioOutMap.get(uid)  ?? 0);
       }
-      // Weighted average read ratio from upstream contributions
+      // Weighted average ratios from upstream contributions
       readRatio = rpsIn > 0 ? totalReadRpsIn / rpsIn : 0.5;
+      badRatio  = rpsIn > 0 ? totalBadRpsIn  / rpsIn : 0;
     }
 
     const readRpsIn = rpsIn * readRatio;
     const writeRpsIn = rpsIn * (1 - readRatio);
+    const badRpsIn = rpsIn * badRatio;
 
     // ---- Capacity & load ----
     const capacity = computeCapacity(type, config);
@@ -762,10 +776,11 @@ export function runSimulationTick(
         if (zoneConfig?.zoneFailed) {
           nodeMetrics[node.id] = {
             rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
-            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn, badRatio, badRpsIn,
           };
           rpsOutMap.set(node.id, 0);
           readRatioOutMap.set(node.id, readRatio);
+          badRatioOutMap.set(node.id, badRatio);
           continue;
         }
       }
@@ -776,10 +791,11 @@ export function runSimulationTick(
       if (directRegionId && effectivelyFailedRegions.has(directRegionId)) {
         nodeMetrics[node.id] = {
           rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
-          errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+          errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn, badRatio, badRpsIn,
         };
         rpsOutMap.set(node.id, 0);
         readRatioOutMap.set(node.id, readRatio);
+        badRatioOutMap.set(node.id, badRatio);
         continue;
       }
       // Check zone → region path (zonal components inside an effectively failed region)
@@ -788,19 +804,21 @@ export function runSimulationTick(
         if (zoneRegionId && effectivelyFailedRegions.has(zoneRegionId)) {
           nodeMetrics[node.id] = {
             rpsIn, rpsOut: 0, load: 2, latencyMs: 0, p99LatencyMs: 0,
-            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn,
+            errorRate: 1, failed: true, readRatio, readRpsIn, writeRpsIn, badRatio, badRpsIn,
           };
           rpsOutMap.set(node.id, 0);
           readRatioOutMap.set(node.id, readRatio);
+          badRatioOutMap.set(node.id, badRatio);
           continue;
         }
       }
     }
 
-    // ---- Per-type tick: rpsOut, readRatioOut, latency penalties, detail ----
+    // ---- Per-type tick: rpsOut, readRatioOut, badRatioOut, latency penalties, detail ----
     const prevNodeMetrics = previousMetrics[node.id];
     let rpsOut: number;
     let readRatioOut = readRatio;
+    let badRatioOut = badRatio; // default: pass through unchanged; firewall scrubs it
     let detail: ComponentDetail | undefined;
 
     switch (type) {
@@ -1384,19 +1402,41 @@ export function runSimulationTick(
       }
 
       case 'firewall': {
-        const blockRatePct = config.firewallBlockRatePct ?? 0;
-        const blockRate    = blockRatePct / 100;
-        const blockedRps   = rpsIn * blockRate;
-        const passedRps    = rpsIn - blockedRps;
-        const dropRate     = computeDropRate(load);
+        const manualBlockRate = (config.firewallBlockRatePct ?? 0) / 100;
+        const rules           = config.firewallRules ?? 10;
+        const inspectionMode  = config.firewallInspectionMode ?? 'basic';
+
+        // Detection efficiency: how well the firewall identifies bad traffic.
+        // Deep inspection catches more (each rule covers ~5 % of threat patterns);
+        // basic/L4 is less thorough (~4 % per rule). Capped at 100%.
+        const detectionEfficiency = Math.min(
+          1,
+          inspectionMode === 'deep' ? rules * 0.05 : rules * 0.04
+        );
+
+        // Auto-block rate: bad traffic fraction × how well the firewall can detect it.
+        const autoBlockRate   = badRatio * detectionEfficiency;
+        // Total block rate: auto-detected + manually configured (e.g., IP blocklist).
+        const totalBlockRate  = Math.min(1, autoBlockRate + manualBlockRate);
+
+        const passedRps       = rpsIn * (1 - totalBlockRate);
+        const dropRate        = computeDropRate(load); // capacity overload drops
         rpsOut = passedRps * (1 - dropRate);
-        // Rule coverage: each rule handles up to 5% of traffic patterns, capped at 100%
-        const rules       = config.firewallRules ?? 10;
-        const ruleMatchRate = Math.min(1, rules * 0.05);
-        // Error rate combines blocked traffic and capacity overload errors
-        errorRate = Math.min(1, blockRate + computeErrorRate(load) * (1 - blockRate));
-        const allowedRps = rpsOut;
-        detail = { kind: 'firewall', allowedRps, blockedRps, ruleMatchRate };
+
+        // After scrubbing, remaining bad traffic is the undetected fraction.
+        const remainingBadRps = rpsIn * badRatio * (1 - detectionEfficiency);
+        badRatioOut = rpsOut > 0 ? remainingBadRps / rpsOut : 0;
+
+        const autoDetectedRps  = rpsIn * autoBlockRate;
+        const manualBlockedRps = rpsIn * manualBlockRate;
+        const blockedRps       = rpsIn * totalBlockRate;
+        const allowedRps       = rpsOut;
+
+        // Error rate = total block rate (blocked traffic = errors from caller's perspective)
+        // plus any capacity-overload errors
+        errorRate = Math.min(1, totalBlockRate + computeErrorRate(load) * (1 - totalBlockRate));
+
+        detail = { kind: 'firewall', allowedRps, blockedRps, autoDetectedRps, manualBlockedRps, detectionEfficiency };
         break;
       }
 
@@ -1433,6 +1473,8 @@ export function runSimulationTick(
       readRatio,
       readRpsIn,
       writeRpsIn,
+      badRatio,
+      badRpsIn,
       ...(readLoad  !== undefined && { readLoad }),
       ...(writeLoad !== undefined && { writeLoad }),
       ...(detail    !== undefined && { detail }),
@@ -1440,6 +1482,7 @@ export function runSimulationTick(
 
     rpsOutMap.set(node.id, rpsOut);
     readRatioOutMap.set(node.id, readRatioOut);
+    badRatioOutMap.set(node.id, badRatioOut);
   }
 
   // ---- 6. Edge metrics ----

@@ -76,7 +76,7 @@ export type ComponentDetail =
   | { kind: 'global_accelerator'; activeRegions: number; failedRegions: number; reroutedRps: number }
   | { kind: 'api_gateway'; activeRoutes: number; routedRps: number; throttledRps: number; cacheHitRate: number }
   | { kind: 'nat_gateway'; translatedConnections: number; bandwidthUtilizationPct: number; droppedPackets: number }
-  | { kind: 'firewall'; allowedRps: number; blockedRps: number; ruleMatchRate: number };
+  | { kind: 'firewall'; allowedRps: number; blockedRps: number; autoDetectedRps: number; manualBlockedRps: number; detectionEfficiency: number };
 
 export interface NodeMetrics {
   rpsIn: number;
@@ -92,6 +92,10 @@ export interface NodeMetrics {
   readRpsIn: number;
   /** Derived: rpsIn * (1 - readRatio) */
   writeRpsIn: number;
+  /** Fraction of rpsIn that is malicious/bad traffic (0–1). Propagated from traffic generators. Firewall scrubs this. */
+  badRatio: number;
+  /** Derived: rpsIn * badRatio */
+  badRpsIn: number;
   /** Database only: load on read path (read rps / read capacity) */
   readLoad?: number;
   /** Database only: load on write path (write rps / write capacity) */
@@ -192,6 +196,8 @@ export interface NodeConfig {
   generatorPattern?: TrafficPattern;
   /** 0–100: percentage of traffic that is reads. Default 50. */
   readRatioPct?: number;
+  /** 0–100: percentage of generated traffic that is malicious/bad. Default 0. Firewall detects and drops it. */
+  badTrafficPct?: number;
   // Rate Limiter
   rateLimitAlgorithm?: RateLimitAlgorithm;
   requestsPerSecond?: number;   // allowed RPS (default 1000)
