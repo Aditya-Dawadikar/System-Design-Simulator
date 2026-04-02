@@ -10,7 +10,7 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 
 ## Features
 
-- **20 component types** — CDN, global accelerator, load balancers, API gateways, app servers, caches, databases, object/block/network storage, pub/sub, cloud functions, cron jobs, worker pools, rate limiters, service mesh, and traffic generators
+- **24 component types** — CDN, traffic generator, global accelerator, load balancer, API gateway, firewall, NAT gateway, public/private subnets, app servers, caches, databases, object/block/network storage, pub/sub, cloud functions, cron jobs, worker pools, rate limiters, service mesh, comments, regions, and availability zones
 - **AWS-aligned infrastructure scopes** — Region and Availability Zone containers with zone and region failure simulation; zonal vs. regional vs. global component classification; cross-zone (+2 ms) and cross-region (+75 ms) latency penalties on edges
 - **Live simulation** — 500 ms tick loop propagates RPS through the graph, computing load, latency, error rates, and component-specific detail metrics for every node
 - **App server autoscaling** — full FSM with warm pool (instant scale), cold provisioning countdown, configurable scale-up/down thresholds and cooldowns, min/max instance clamping
@@ -78,6 +78,8 @@ Open [http://localhost:3000](http://localhost:3000).
 |------|------|-------|-----------|-------------------|
 | ⬡ | Region | — | Region name, failed toggle, canvas size | Visual grouping for a cloud region; region failure force-fails all member nodes; +75 ms cross-region edge penalty |
 | ◎ | Availability Zone | — | Zone name, failed toggle, canvas size | Visual grouping for an AZ; zone failure force-fails all member nodes |
+| ⬤ | Public Subnet | — | CIDR block, canvas size | Visual grouping for internet-facing resources such as load balancers, firewalls, and NAT gateways |
+| ◯ | Private Subnet | — | CIDR block, canvas size | Visual grouping for internal resources; documents workloads that egress through NAT rather than directly to the internet |
 
 ### Resource components
 
@@ -88,6 +90,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | ⊙ | Global Accelerator | Global | Routing policy, failover | Anycast routing across regions; health-aware proportional failover weighted by active zone count |
 | ⇌ | Load Balancer | Regional | Algorithm, health checks, max connections | Traffic distribution across AZs; connection tracking; health-check-based rerouting around failed targets; scaling event signal above 75% load |
 | ⊞ | API Gateway | Regional | Route table (path + weight), auth, response cache | Weight-based microservice routing; gateway-level read caching; per-request auth overhead |
+| ⊟ | Firewall | Regional | Rules, inspection mode, block rate | Stateful filtering with configurable blocking behavior, inspection overhead, and blocked-RPS metrics |
+| ⇢ | NAT Gateway | Regional | Bandwidth, max connections | Outbound address translation with bandwidth and connection tracking metrics when traffic is explicitly routed through it |
 | ◫ | Cloud Storage | Regional | Throughput, storage class, object size | Bandwidth throttling; downstream event notifications; storage class latency tiers |
 | ⊕ | Pub/Sub | Regional | Partitions, retention | Partition-limited throughput; stateful subscriber lag accumulation under overload |
 | ƒ | Cloud Function | Regional | Memory, concurrency, exec time | Serverless cold starts; concurrency throttling; IO wait inflation from downstream stores |

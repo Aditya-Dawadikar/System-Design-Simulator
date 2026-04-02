@@ -10,6 +10,8 @@ This file reflects the current codebase state. It replaces the older component l
 
 - [x] Region container nodes
 - [x] Availability Zone container nodes
+- [x] Public Subnet container nodes
+- [x] Private Subnet container nodes
 - [x] Scope-aware placement for global, regional, and zonal resources
 - [x] Cross-zone edge latency penalties
 - [x] Cross-region edge latency penalties
@@ -21,6 +23,8 @@ This file reflects the current codebase state. It replaces the older component l
 - [x] CDN
 - [x] Traffic Generator
 - [x] Load Balancer
+- [x] Firewall
+- [x] NAT Gateway
 - [x] Rate Limiter
 - [x] Service Mesh
 - [x] API Gateway
@@ -51,10 +55,8 @@ This file reflects the current codebase state. It replaces the older component l
 
 ## High Priority Next Work
 
-- [ ] Add Firewall / WAF to model filtering, inspection latency, and blocked traffic.
-- [ ] Add NAT Gateway to model outbound egress bottlenecks for private workloads.
 - [ ] Expand automated SimulationEngine coverage for overload, failover, routing, and stateful component behavior.
-- [ ] Refresh COMPONENTS.md so it documents all shipped nodes, including Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
+- [ ] Refresh COMPONENTS.md so it documents all shipped nodes, including Firewall, NAT Gateway, Public Subnet, Private Subnet, Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
 
 ## Medium Priority Backlog
 
@@ -67,6 +69,6 @@ This file reflects the current codebase state. It replaces the older component l
 
 ## Ongoing Quality Tasks
 
-- [ ] Keep README component counts and feature summaries aligned with the shipped node set.
+- [ ] Keep README and TODO component counts and feature summaries aligned with the shipped node set.
 - [ ] Keep traffic pattern documentation synchronized between the simulation engine and the simulation store.
 - [ ] Add more architecture templates that exercise multi-region failover, queue-heavy workloads, and service-mesh routing.
