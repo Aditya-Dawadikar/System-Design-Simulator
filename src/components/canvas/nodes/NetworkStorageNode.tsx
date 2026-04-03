@@ -31,10 +31,6 @@ const STATUS_LABELS: Record<NodeStatus, string> = {
   ok: 'OK', stressed: 'STRESS', critical: 'CRIT', failed: 'FAIL', idle: 'IDLE',
 };
 
-function fmtNum(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0);
-}
-
 export default memo(function NetworkStorageNode({ id, selected }: NodeProps) {
   const config  = useArchitectureStore((s) => s.nodeConfigs[id]);
   const running = useSimulationStore((s) => s.running);

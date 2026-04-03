@@ -57,7 +57,7 @@ export default function ScenarioDocsDrawer({ scenarioName, docs, onClose }: Prop
         }}>
           <div>
             <div style={{ fontSize: 9, color: 'var(--accent-orange)', letterSpacing: 2, marginBottom: 3 }}>
-              // SCENARIO DOCS
+              {'// SCENARIO DOCS'}
             </div>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{scenarioName}</div>
           </div>

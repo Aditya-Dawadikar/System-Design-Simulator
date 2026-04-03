@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useArchitectureStore } from '@/store/architectureStore';
@@ -66,6 +66,12 @@ export default function Dashboard() {
 
   const searchTerm = normalizeSearchValue(searchQuery);
 
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    setArchVisible(ARCH_PAGE_SIZE);
+    setScenarioVisible(SCENARIO_PAGE_SIZE);
+  }
+
   const filteredArchitectures = ARCHITECTURE_LIBRARY.filter((entry) =>
     matchesSearch(searchTerm, [entry.name, entry.description, entry.difficulty, ...entry.tags])
   );
@@ -82,11 +88,6 @@ export default function Dashboard() {
       ...entry.docs.constraints,
     ])
   );
-
-  useEffect(() => {
-    setArchVisible(ARCH_PAGE_SIZE);
-    setScenarioVisible(SCENARIO_PAGE_SIZE);
-  }, [searchTerm]);
 
   const visibleArchitectures = filteredArchitectures.slice(0, archVisible);
   const visibleScenarios = filteredScenarios.slice(0, scenarioVisible);
@@ -147,7 +148,7 @@ export default function Dashboard() {
         {/* Hero label */}
         <div style={{ marginBottom: 32 }}>
           <div style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: 2, marginBottom: 6 }}>
-            // SELECT MODE
+            {'// SELECT MODE'}
           </div>
           <div style={{ width: 40, height: 2, background: 'var(--accent-cyan)', borderRadius: 1 }} />
         </div>
@@ -216,7 +217,7 @@ export default function Dashboard() {
               <input
                 type="search"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                onChange={(e) => handleSearchChange(e.currentTarget.value)}
                 placeholder="Search by name, tag, difficulty, domain, or requirement"
                 aria-label="Search architecture library and real-world scenarios"
                 style={{
@@ -254,7 +255,7 @@ export default function Dashboard() {
         <div>
           <div style={{ marginBottom: 24 }}>
             <div style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: 2, marginBottom: 6 }}>
-              // ARCHITECTURE LIBRARY
+              {'// ARCHITECTURE LIBRARY'}
             </div>
             <div style={{ width: 40, height: 2, background: 'var(--accent-purple)', borderRadius: 1 }} />
             <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>
@@ -313,7 +314,7 @@ export default function Dashboard() {
         <div style={{ marginTop: 56 }}>
           <div style={{ marginBottom: 24 }}>
             <div style={{ color: 'var(--text-dim)', fontSize: 11, letterSpacing: 2, marginBottom: 6 }}>
-              // REAL-WORLD SCENARIOS
+              {'// REAL-WORLD SCENARIOS'}
             </div>
             <div style={{ width: 40, height: 2, background: 'var(--accent-orange)', borderRadius: 1 }} />
             <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 10 }}>

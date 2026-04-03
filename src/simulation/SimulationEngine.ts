@@ -1569,7 +1569,6 @@ export function runSimulationTick(
         const mtlsOverhead = mtls ? 1 : 0;
         const obsOverhead  = obsLevel === 'full' ? 1 : obsLevel === 'basic' ? 0.5 : 0;
         const proxyBase    = baseLatency + mtlsOverhead + obsOverhead;
-        const queuePenalty = Math.pow(Math.min(load, 2.0), 2) * 200;
 
         // ── Observe downstream health (previous tick for stability) ──────────
         // The mesh is a synchronous pass-through: if a downstream node is slow or

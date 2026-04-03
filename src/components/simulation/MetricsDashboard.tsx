@@ -1,32 +1,37 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Sparkline from '@/components/shared/Sparkline';
 import LatencyPercentileChart from './LatencyPercentileChart';
 import type { Node } from 'reactflow';
-// Helper to get global RPS history (sum of all node rpsIn)
-import { useRef } from 'react';
+
 // --- Global RPS history hook ---
 function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, tick: number, maxPoints = 100) {
-  const historyRef  = useRef<number[]>([]);
+  const [history, setHistory] = useState<number[]>([]);
   const lastTickRef = useRef<number>(-1);
   const totalRps = Object.values(nodeMetrics).reduce((sum, m) => sum + (m.rpsIn || 0), 0);
-  if (tick !== lastTickRef.current) {
-    lastTickRef.current = tick;
-    historyRef.current = [...historyRef.current.slice(-maxPoints + 1), totalRps];
-  }
-  return historyRef.current;
+  useEffect(() => {
+    if (tick !== lastTickRef.current) {
+      lastTickRef.current = tick;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHistory(prev => [...prev.slice(-maxPoints + 1), totalRps]);
+    }
+  }, [tick, totalRps, maxPoints]);
+  return history;
 }
 
 // --- Global error-rate history hook ---
 function useGlobalErrorRateHistory(globalErrorRate: number, tick: number, maxPoints = 100) {
-  const historyRef  = useRef<number[]>([]);
+  const [history, setHistory] = useState<number[]>([]);
   const lastTickRef = useRef<number>(-1);
-  if (tick !== lastTickRef.current) {
-    lastTickRef.current = tick;
-    historyRef.current = [...historyRef.current.slice(-maxPoints + 1), globalErrorRate];
-  }
-  return historyRef.current;
+  useEffect(() => {
+    if (tick !== lastTickRef.current) {
+      lastTickRef.current = tick;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHistory(prev => [...prev.slice(-maxPoints + 1), globalErrorRate]);
+    }
+  }, [tick, globalErrorRate, maxPoints]);
+  return history;
 }
 import NodeMetricCard from './NodeMetricCard';
 import EventLog from './EventLog';

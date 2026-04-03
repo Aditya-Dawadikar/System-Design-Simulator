@@ -24,7 +24,7 @@ function fmtMs(ms: number): string {
   return `${ms.toFixed(1)}ms`;
 }
 
-export default function LatencyPercentileChart({ latencyHistory, nodeLabel: _nodeLabel }: Props) {
+export default function LatencyPercentileChart({ latencyHistory }: Props) {
   const n = latencyHistory.length;
 
   // viewBox coordinate system — SVG scales to fill its container

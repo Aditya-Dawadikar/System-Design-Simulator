@@ -20,11 +20,6 @@ export default function ArcGauge({ value, color, size = 64 }: ArcGaugeProps) {
   const r = (size / 2) - 6;
   const strokeWidth = 5;
 
-  // Semicircle: starts at 180° (left), ends at 0° (right), going clockwise through bottom
-  // We parameterize from left (-x axis) sweeping 180° clockwise
-  const startAngle = Math.PI; // left
-  const endAngle = 0;         // right (going counter-clockwise in math = clockwise visually when y flipped)
-
   // Arc from left to right along the top of a circle means going counterclockwise in SVG coords
   // We'll map 0–1 to a sweep from left(180°) to right(0°) going counterclockwise (upward arc)
   const toCartesian = (angleDeg: number) => {

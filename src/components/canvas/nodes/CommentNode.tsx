@@ -86,7 +86,7 @@ export default memo(function CommentNode({ id, selected }: NodeProps) {
             flexShrink: 0,
           }}
         >
-          //
+          {'//'}
         </span>
         <span
           style={{

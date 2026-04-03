@@ -119,10 +119,6 @@ export default function ServiceMeshFields({ nodeId }: ServiceMeshFieldsProps) {
     updateRoutes(routes.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
-  function getLabel(nodeId: string): string {
-    return nodeConfigs[nodeId]?.label ?? nodeId ?? '—';
-  }
-
   return (
     <div>
       {/* mTLS */}
