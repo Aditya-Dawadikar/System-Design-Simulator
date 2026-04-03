@@ -1220,13 +1220,13 @@ export function runSimulationTick(
         const shards         = config.shards ?? 1;
         const poolSizePerNode = 100; // connections per shard
 
-        if (dbRole === 'replica') {
-          // ── Read-only replica ──────────────────────────────────────────────
-          // Writes arriving at a replica are rejected immediately (errorRate).
+        if (dbRole === 'replica' && config.primaryNodeId) {
+          // ── Read-write replica with internal routing to primary ──────────────
+          // Reads stay local; writes internally route to primary with cross-zone/region latency
           const replicaReadLoad = readLoad ?? 0;
           const connectionPoolMax  = shards * poolSizePerNode;
-          const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(readRpsIn * 0.1));
-          const queryQueueDepth    = Math.max(0, Math.round(readRpsIn * 0.1 - connectionPoolMax));
+          const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(rpsIn * 0.1));
+          const queryQueueDepth    = Math.max(0, Math.round(rpsIn * 0.1 - connectionPoolMax));
           const slowQueryRate      = Math.min(0.4, Math.max(0, (replicaReadLoad - 0.6) / 0.6) * 0.4);
           if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
 
@@ -1236,13 +1236,70 @@ export function runSimulationTick(
           const replicationLagMs = Math.max(0, (primaryWriteLoad - 0.3) / 0.7 * 500);
           if (replicationLagMs > 0) latencyMs += replicationLagMs * 0.05; // stale-read overhead
 
-          // Write rejections
+          // Calculate write routing latency (internal forwarding to primary)
+          let writeRoutingLatency = 0;
+          const replicaZoneId = config.zoneId;
+          const primaryCfg = nodeConfigs[config.primaryNodeId];
+          const primaryZoneId = primaryCfg?.zoneId;
+          
+          if (replicaZoneId && primaryZoneId && replicaZoneId !== primaryZoneId) {
+            const replicaRegionId = nodeConfigs[replicaZoneId]?.regionId;
+            const primaryRegionId = nodeConfigs[primaryZoneId]?.regionId;
+            if (replicaRegionId && primaryRegionId && replicaRegionId !== primaryRegionId) {
+              writeRoutingLatency = 75; // cross-region write routing
+            } else {
+              writeRoutingLatency = 2; // cross-zone same-region write routing
+            }
+          }
+
+          // Check if primary is down: if so, reject writes
+          const primaryFailed = previousMetrics[config.primaryNodeId]?.failed === true;
+          
+          if (primaryFailed) {
+            // Primary is down: reads succeed, writes fail
+            const dropRate = computeDropRate(replicaReadLoad);
+            rpsOut = readRpsIn * (1 - dropRate);
+            errorRate = rpsIn > 0 ? writeRpsIn / rpsIn : 0;
+            failed = replicaReadLoad > 1.05 || writeRpsIn > rpsIn * 0.05; // fail if writes are attempted and primary is down
+            detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate, replicationLagMs, writeRejectedRps: writeRpsIn };
+          } else {
+            // Primary is healthy: forward writes with routing latency
+            // Compute weighted latency: reads local, writes routed to primary
+            const readShare = readRpsIn;
+            const writeShare = writeRpsIn;
+            if (rpsIn > 0) {
+              latencyMs = (readShare * latencyMs + writeShare * (latencyMs + writeRoutingLatency)) / rpsIn;
+            }
+
+            // Accept both reads and writes; load based on replica's capacity
+            const dropRate = computeDropRate(load);
+            rpsOut = rpsIn * (1 - dropRate);
+            errorRate = 0; // no longer reject writes when primary is healthy
+            failed = load > 1.05;
+            detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate, replicationLagMs, writeRoutingLatency };
+          }
+        } else if (dbRole === 'replica') {
+          // ── Read-only replica (no primary specified) ──────────────────────────
+          const replicaReadLoad = readLoad ?? 0;
+          const connectionPoolMax  = shards * poolSizePerNode;
+          const connectionPoolUsed = Math.min(connectionPoolMax, Math.round(readRpsIn * 0.1));
+          const queryQueueDepth    = Math.max(0, Math.round(readRpsIn * 0.1 - connectionPoolMax));
+          const slowQueryRate      = Math.min(0.4, Math.max(0, (replicaReadLoad - 0.6) / 0.6) * 0.4);
+          if (queryQueueDepth > 0) latencyMs += Math.min(500, queryQueueDepth * 5);
+
+          // Replication lag only
+          const primaryPrev = config.primaryNodeId ? previousMetrics[config.primaryNodeId] : undefined;
+          const primaryWriteLoad = primaryPrev?.writeLoad ?? 0;
+          const replicationLagMs = Math.max(0, (primaryWriteLoad - 0.3) / 0.7 * 500);
+          if (replicationLagMs > 0) latencyMs += replicationLagMs * 0.05;
+
+          // Reject writes
           const writeRejectedRps = writeRpsIn;
           errorRate = rpsIn > 0 ? writeRpsIn / rpsIn : 0;
           failed    = replicaReadLoad > 1.05 || writeRpsIn > rpsIn * 0.05;
 
           const dropRate = computeDropRate(replicaReadLoad);
-          rpsOut = readRpsIn * (1 - dropRate); // reads only pass through
+          rpsOut = readRpsIn * (1 - dropRate); // reads only
 
           detail = { kind: 'database', connectionPoolUsed, connectionPoolMax, queryQueueDepth, slowQueryRate, replicationLagMs, writeRejectedRps };
         } else {

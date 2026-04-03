@@ -77,7 +77,7 @@ export type ComponentDetail =
       desiredInstances?: number;  // target_tracking + predictive: computed target count
     }
   | { kind: 'cache';          hitRate: number; evictionRate: number; memoryUsedPct: number }
-  | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number; replicationLagMs: number; writeRejectedRps: number }
+  | { kind: 'database';       connectionPoolUsed: number; connectionPoolMax: number; queryQueueDepth: number; slowQueryRate: number; replicationLagMs: number; writeRejectedRps?: number; writeRoutingLatency?: number }
   | { kind: 'cloud_storage';  throttledRequests: number; bandwidthUtilization: number }
   | { kind: 'block_storage';  iopsUsed: number; iopsLimit: number; queueDepth: number; throughputMbps: number }
   | { kind: 'network_storage'; activeConnections: number; bandwidthUsedMbps: number; throughputLimitMbps: number }
