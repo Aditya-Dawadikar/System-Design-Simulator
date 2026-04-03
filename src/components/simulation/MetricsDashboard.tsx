@@ -7,19 +7,23 @@ import type { Node } from 'reactflow';
 // Helper to get global RPS history (sum of all node rpsIn)
 import { useRef } from 'react';
 // --- Global RPS history hook ---
-function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, maxPoints = 100) {
-  const historyRef = useRef<number[]>([]);
+function useGlobalRpsHistory(nodeMetrics: Record<string, NodeMetrics>, tick: number, maxPoints = 100) {
+  const historyRef  = useRef<number[]>([]);
+  const lastTickRef = useRef<number>(-1);
   const totalRps = Object.values(nodeMetrics).reduce((sum, m) => sum + (m.rpsIn || 0), 0);
-  if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== totalRps) {
+  if (tick !== lastTickRef.current) {
+    lastTickRef.current = tick;
     historyRef.current = [...historyRef.current.slice(-maxPoints + 1), totalRps];
   }
   return historyRef.current;
 }
 
 // --- Global error-rate history hook ---
-function useGlobalErrorRateHistory(globalErrorRate: number, maxPoints = 100) {
-  const historyRef = useRef<number[]>([]);
-  if (historyRef.current.length === 0 || historyRef.current[historyRef.current.length - 1] !== globalErrorRate) {
+function useGlobalErrorRateHistory(globalErrorRate: number, tick: number, maxPoints = 100) {
+  const historyRef  = useRef<number[]>([]);
+  const lastTickRef = useRef<number>(-1);
+  if (tick !== lastTickRef.current) {
+    lastTickRef.current = tick;
     historyRef.current = [...historyRef.current.slice(-maxPoints + 1), globalErrorRate];
   }
   return historyRef.current;
@@ -216,6 +220,7 @@ function formatMs(ms: number): string {
 export default function MetricsDashboard() {
   const nodeMetrics      = useSimulationStore((s) => s.nodeMetrics);
   const latencyHistory   = useSimulationStore((s) => s.latencyHistory);
+  const tick             = useSimulationStore((s) => s.tick);
   const nodes            = useArchitectureStore((s) => s.nodes);
   const nodeConfigs      = useArchitectureStore((s) => s.nodeConfigs);
   const propagatedErrorRates = useMemo(
@@ -226,8 +231,8 @@ export default function MetricsDashboard() {
     () => computeGlobalMetrics(nodeMetrics, nodes, nodeConfigs, propagatedErrorRates),
     [nodeMetrics, nodes, nodeConfigs, propagatedErrorRates]
   );
-  const globalRpsHistory = useGlobalRpsHistory(nodeMetrics, 100);
-  const globalErrorHistory = useGlobalErrorRateHistory(global.errRate, 100);
+  const globalRpsHistory   = useGlobalRpsHistory(nodeMetrics, tick, 100);
+  const globalErrorHistory = useGlobalErrorRateHistory(global.errRate, tick, 100);
 
   // Latency chart node selector
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
