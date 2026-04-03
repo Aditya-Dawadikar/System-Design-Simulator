@@ -286,8 +286,8 @@ function ComponentDetailRow({ detail }: { detail: ComponentDetail }) {
       break;
     case 'database':
       a = { label: 'POOL', value: `${detail.connectionPoolUsed}/${detail.connectionPoolMax}`, alert: detail.connectionPoolUsed >= detail.connectionPoolMax };
-      if (detail.writeRejectedRps > 0) {
-        b = { label: 'REJECT', value: `${fmtRps(detail.writeRejectedRps)}/s`, alert: true };
+      if ((detail.writeRejectedRps ?? 0) > 0) {
+        b = { label: 'REJECT', value: `${fmtRps(detail.writeRejectedRps ?? 0)}/s`, alert: true };
       } else if (detail.replicationLagMs > 0) {
         b = { label: 'LAG', value: fmtMs(detail.replicationLagMs), alert: detail.replicationLagMs > 100 };
       } else {

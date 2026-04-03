@@ -117,13 +117,14 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
       }
       if (d?.kind === 'database') {
         const prevQueue    = pd?.kind === 'database' ? pd.queryQueueDepth    : 0;
-        const prevRejected = pd?.kind === 'database' ? pd.writeRejectedRps   : 0;
+        const prevRejected = pd?.kind === 'database' ? (pd.writeRejectedRps ?? 0) : 0;
+        const currentRejected = d.writeRejectedRps ?? 0;
         const prevLag      = pd?.kind === 'database' ? pd.replicationLagMs   : 0;
         if (d.queryQueueDepth > 0 && prevQueue === 0)
           newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} connection pool exhausted — ${d.queryQueueDepth} queries queuing`, nodeId: id });
-        if (d.writeRejectedRps > 0 && prevRejected === 0)
-          newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} write rejected — replica cannot serve writes (${Math.round(d.writeRejectedRps)} rps routed incorrectly)`, nodeId: id });
-        if (d.writeRejectedRps === 0 && prevRejected > 0)
+        if (currentRejected > 0 && prevRejected === 0)
+          newEvents.push({ tick: tick + 1, level: 'error', message: `${lbl} write rejected — replica cannot serve writes (${Math.round(currentRejected)} rps routed incorrectly)`, nodeId: id });
+        if (currentRejected === 0 && prevRejected > 0)
           newEvents.push({ tick: tick + 1, level: 'info', message: `${lbl} write traffic cleared — replica healthy`, nodeId: id });
         if (d.replicationLagMs > 200 && prevLag <= 200)
           newEvents.push({ tick: tick + 1, level: 'warn', message: `${lbl} replication lag ${Math.round(d.replicationLagMs)}ms — primary write load high`, nodeId: id });
