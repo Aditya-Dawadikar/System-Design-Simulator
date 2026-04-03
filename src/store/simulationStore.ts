@@ -13,6 +13,7 @@ interface SimulationStore {
   edgeMetrics: Record<string, EdgeMetrics>;
   events: LogEvent[];
   history: Record<string, number[]>;
+  latencyHistory: Record<string, number[]>;  // latencyMs per node, last 40 ticks
   _intervalId: ReturnType<typeof setInterval> | null;
 
   start: () => void;
@@ -43,6 +44,7 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
   edgeMetrics: {},
   events: [],
   history: {},
+  latencyHistory: {},
   _intervalId: null,
 
   start: () => {
@@ -62,7 +64,7 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
   reset: () => {
     const { _intervalId } = get();
     if (_intervalId) clearInterval(_intervalId);
-    set({ running: false, _intervalId: null, tick: 0, nodeMetrics: {}, edgeMetrics: {}, events: [], history: {} });
+    set({ running: false, _intervalId: null, tick: 0, nodeMetrics: {}, edgeMetrics: {}, events: [], history: {}, latencyHistory: {} });
   },
 
   setPeakRps: (rps) => set({ peakRps: rps }),
@@ -76,11 +78,19 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
     const prevMetrics = get().nodeMetrics;
     const result = runSimulationTick({ nodes, edges, nodeConfigs, edgeConfigs }, currentRps, tick, prevMetrics, history);
 
-    // Update history (last 40 points)
+    // Update RPS history (last 40 points, used by predictive autoscaling)
     const newHistory: Record<string, number[]> = {};
     for (const [id, m] of Object.entries(result.nodeMetrics)) {
       const prev = history[id] ?? [];
       newHistory[id] = [...prev.slice(-39), m.rpsIn];
+    }
+
+    // Update latency history (last 40 points, used by percentile chart)
+    const prevLatencyHistory = get().latencyHistory;
+    const newLatencyHistory: Record<string, number[]> = {};
+    for (const [id, m] of Object.entries(result.nodeMetrics)) {
+      const prev = prevLatencyHistory[id] ?? [];
+      newLatencyHistory[id] = [...prev.slice(-39), m.latencyMs];
     }
 
     // Generate events
@@ -190,6 +200,7 @@ export const useSimulationStore = create<SimulationStore>()((set, get) => ({
       nodeMetrics: result.nodeMetrics,
       edgeMetrics: result.edgeMetrics,
       history: newHistory,
+      latencyHistory: newLatencyHistory,
       events: newEvents.length ? [...s.events, ...newEvents].slice(-100) : s.events,
     }));
   },

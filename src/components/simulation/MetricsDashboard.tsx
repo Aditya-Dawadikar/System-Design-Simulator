@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Sparkline from '@/components/shared/Sparkline';
+import LatencyPercentileChart from './LatencyPercentileChart';
 import type { Node } from 'reactflow';
 // Helper to get global RPS history (sum of all node rpsIn)
 import { useRef } from 'react';
@@ -44,6 +45,12 @@ interface GlobalMetrics {
 
 // Containers don't contribute directly to error rate — only their children do.
 const CONTAINER_TYPES = new Set(['region', 'availability_zone']);
+
+// Node types excluded from the latency percentile chart selector
+const NO_LATENCY_TYPES = new Set([
+  'region', 'availability_zone', 'public_subnet', 'private_subnet',
+  'comment', 'traffic_generator',
+]);
 
 /**
  * Computes propagated error rates for zone and region container nodes by
@@ -207,9 +214,10 @@ function formatMs(ms: number): string {
 
 
 export default function MetricsDashboard() {
-  const nodeMetrics  = useSimulationStore((s) => s.nodeMetrics);
-  const nodes        = useArchitectureStore((s) => s.nodes);
-  const nodeConfigs  = useArchitectureStore((s) => s.nodeConfigs);
+  const nodeMetrics      = useSimulationStore((s) => s.nodeMetrics);
+  const latencyHistory   = useSimulationStore((s) => s.latencyHistory);
+  const nodes            = useArchitectureStore((s) => s.nodes);
+  const nodeConfigs      = useArchitectureStore((s) => s.nodeConfigs);
   const propagatedErrorRates = useMemo(
     () => computeZoneRegionErrorRates(nodeMetrics, nodes, nodeConfigs),
     [nodeMetrics, nodes, nodeConfigs]
@@ -220,6 +228,21 @@ export default function MetricsDashboard() {
   );
   const globalRpsHistory = useGlobalRpsHistory(nodeMetrics, 100);
   const globalErrorHistory = useGlobalErrorRateHistory(global.errRate, 100);
+
+  // Latency chart node selector
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const eligibleNodes = useMemo(
+    () => nodes.filter(n => !NO_LATENCY_TYPES.has(String(n.type))),
+    [nodes]
+  );
+  // Fall back to first eligible node if selection is invalid or not yet made
+  const effectiveNodeId = (selectedNodeId && eligibleNodes.some(n => n.id === selectedNodeId))
+    ? selectedNodeId
+    : (eligibleNodes[0]?.id ?? null);
+  const chartHistory  = effectiveNodeId ? (latencyHistory[effectiveNodeId] ?? []) : [];
+  const chartLabel    = effectiveNodeId
+    ? (nodeConfigs[effectiveNodeId]?.label ?? effectiveNodeId)
+    : '';
 
   return (
     <div
@@ -342,7 +365,7 @@ export default function MetricsDashboard() {
         </div>
       </div>
 
-      {/* ── Right: Logs, vertically scrollable ── */}
+      {/* ── Right: Latency chart + Event Log ── */}
       <div
         style={{
           flex: 1,
@@ -353,12 +376,75 @@ export default function MetricsDashboard() {
           overflow: 'hidden',
         }}
       >
+        {/* Latency percentile chart */}
+        <div style={{ flexShrink: 0, borderBottom: '1px solid var(--border)' }}>
+          {/* Header row: label + node selector + legend */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '4px 10px',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            <span style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.06em', flexShrink: 0 }}>
+              LATENCY
+            </span>
+            {/* Node selector */}
+            <select
+              value={effectiveNodeId ?? ''}
+              onChange={e => setSelectedNodeId(e.target.value || null)}
+              style={{
+                background: 'var(--bg-base)',
+                border: '1px solid var(--border)',
+                borderRadius: 3,
+                color: 'var(--text)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 9,
+                padding: '1px 4px',
+                cursor: 'pointer',
+                maxWidth: 110,
+                minWidth: 0,
+              }}
+            >
+              {eligibleNodes.length === 0 && (
+                <option value="">— no nodes —</option>
+              )}
+              {eligibleNodes.map(n => (
+                <option key={n.id} value={n.id}>
+                  {nodeConfigs[n.id]?.label ?? n.id}
+                </option>
+              ))}
+            </select>
+            {/* Percentile legend */}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+              {[
+                { label: 'p50', color: '#00ff88' },
+                { label: 'p75', color: '#00ddff' },
+                { label: 'p90', color: '#f59e0b' },
+                { label: 'p95', color: '#f97316' },
+                { label: 'p99', color: '#ef4444' },
+              ].map(p => (
+                <span key={p.label} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <span style={{ width: 12, height: 2, background: p.color, display: 'inline-block', borderRadius: 1 }} />
+                  <span style={{ fontSize: 8, color: p.color }}>{p.label}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* Chart area */}
+          <div style={{ height: 96, padding: '2px 0' }}>
+            <LatencyPercentileChart latencyHistory={chartHistory} nodeLabel={chartLabel} />
+          </div>
+        </div>
+
+        {/* Event log */}
         <div style={{
           fontSize: 11,
           color: 'var(--text-dim)',
-          padding: '6px 12px',
+          padding: '4px 12px',
           borderBottom: '1px solid var(--border)',
           letterSpacing: '0.04em',
+          flexShrink: 0,
         }}>
           EVENT LOG
         </div>
