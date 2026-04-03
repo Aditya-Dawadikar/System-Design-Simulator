@@ -995,7 +995,9 @@ export function runSimulationTick(
             kind: 'app_server', cpuPct, memPct,
             activeInstances: staticInstances,
             pendingInstances: 0, pendingCountdown: 0,
-            warmReserve: 0, scalingEvent: null,
+            drainingInstances: 0, drainCountdown: 0,
+            warmReserve: 0, pendingWarmInstances: 0, warmPendingCountdown: 0,
+            scalingEvent: null,
             scaleUpCooldown: 0, scaleDownCooldown: 0,
           };
         } else {
@@ -1007,6 +1009,7 @@ export function runSimulationTick(
           const scaleUpThr      = config.scaleUpCpuPct          ?? 75;
           const scaleDownThr    = config.scaleDownCpuPct        ?? 25;
           const coldTicks       = config.coldProvisionTicks     ?? 6;
+          const drainTicks      = config.scaleDownDrainTicks   ?? 4;
 
           // Cooldown defaults: TT uses its own fields; all other strategies share scaleUp/DownCooldownTicks
           const scaleUpCDConf   = strategy === 'target_tracking'
@@ -1016,26 +1019,44 @@ export function runSimulationTick(
             ? (config.ttScaleInCooldownTicks  ?? 24)
             : (config.scaleDownCooldownTicks  ?? 12);
 
-          let activeInstances   = prevD?.activeInstances   ?? (config.instances ?? 2);
-          let pendingInstances  = prevD?.pendingInstances  ?? 0;
-          let pendingCountdown  = prevD?.pendingCountdown  ?? 0;
-          let warmReserve       = warmPoolEnabled ? (prevD?.warmReserve ?? warmPool) : 0;
-          let scaleUpCooldown   = prevD?.scaleUpCooldown   ?? 0;
-          let scaleDownCooldown = prevD?.scaleDownCooldown ?? 0;
+          let activeInstances        = prevD?.activeInstances        ?? (config.instances ?? 2);
+          let pendingInstances       = prevD?.pendingInstances       ?? 0;
+          let pendingCountdown       = prevD?.pendingCountdown       ?? 0;
+          let drainingInstances      = prevD?.drainingInstances      ?? 0;
+          let drainCountdown         = prevD?.drainCountdown         ?? 0;
+          let warmReserve            = warmPoolEnabled ? (prevD?.warmReserve            ?? warmPool) : 0;
+          let pendingWarmInstances   = warmPoolEnabled ? (prevD?.pendingWarmInstances   ?? 0)        : 0;
+          let warmPendingCountdown   = warmPoolEnabled ? (prevD?.warmPendingCountdown   ?? 0)        : 0;
+          let scaleUpCooldown        = prevD?.scaleUpCooldown        ?? 0;
+          let scaleDownCooldown      = prevD?.scaleDownCooldown      ?? 0;
 
-          // 1. Promote cold instances whose countdown has expired
+          // 1a. Promote cold instances whose countdown has expired
           if (pendingCountdown > 0) pendingCountdown--;
           if (pendingCountdown === 0 && pendingInstances > 0) {
             activeInstances = Math.min(maxInst, activeInstances + pendingInstances);
             pendingInstances = 0;
           }
 
+          // 1b. Complete drain — fully terminate instances whose drain period has elapsed
+          if (drainCountdown > 0) drainCountdown--;
+          if (drainCountdown === 0 && drainingInstances > 0) {
+            drainingInstances = 0;
+          }
+
+          // 1c. Promote warm-pool replenishment instances when ready
+          if (warmPendingCountdown > 0) warmPendingCountdown--;
+          if (warmPendingCountdown === 0 && pendingWarmInstances > 0) {
+            warmReserve          = Math.min(warmPool, warmReserve + pendingWarmInstances);
+            pendingWarmInstances = 0;
+          }
+
           // 2. Decrement cooldowns
           if (scaleUpCooldown   > 0) scaleUpCooldown--;
           if (scaleDownCooldown > 0) scaleDownCooldown--;
 
-          // 3. Dynamic capacity — IO-scaled perInstRps means a slow DB forces
-          //    cpuPct up even with more instances, correctly showing the DB bottleneck
+          // 3. Dynamic capacity — draining instances are not serving new requests
+          //    IO-scaled perInstRps means a slow DB forces cpuPct up even with
+          //    more instances, correctly showing the DB bottleneck
           const effectiveCap = activeInstances * perInstRps;
           const dynamicLoad  = effectiveCap > 0 ? rpsIn / effectiveCap : 0;
           const { cpuPct, memPct } = computeResourcePcts(dynamicLoad);
@@ -1045,6 +1066,19 @@ export function runSimulationTick(
           let scalingEvent: 'up-warm' | 'up-cold' | 'down' | null = null;
           let projectedRps: number | undefined;
           let desiredInstancesDisplay: number | undefined;
+
+          // Helper: begin graceful shutdown of `n` instances (drain before termination)
+          const startDrain = (n: number): void => {
+            if (n <= 0) return;
+            const toRemove = Math.min(n, activeInstances - minInst);
+            if (toRemove <= 0) return;
+            activeInstances   -= toRemove;
+            // If a drain is already in progress, accumulate; restart the countdown
+            drainingInstances += toRemove;
+            drainCountdown     = drainTicks;
+            scalingEvent       = 'down';
+            scaleDownCooldown  = scaleDownCDConf;
+          };
 
           // Helper: provision `delta` new instances — warm pool first, then cold
           const provisionDelta = (delta: number): void => {
@@ -1088,11 +1122,7 @@ export function runSimulationTick(
             if (desired > totalProvisioned && scaleUpCooldown === 0) {
               provisionDelta(desired - totalProvisioned);
             } else if (desired < activeInstances && scaleDownCooldown === 0) {
-              const newActive = Math.max(minInst, desired);
-              if (warmPoolEnabled && warmPool > 0) warmReserve = Math.min(warmPool, warmReserve + (activeInstances - newActive));
-              activeInstances   = newActive;
-              scalingEvent      = 'down';
-              scaleDownCooldown = scaleDownCDConf;
+              startDrain(activeInstances - Math.max(minInst, desired));
             }
 
           } else if (strategy === 'scheduled') {
@@ -1131,10 +1161,7 @@ export function runSimulationTick(
               if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
                 provisionDelta(1);
               } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
-                activeInstances--;
-                if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
-                scalingEvent      = 'down';
-                scaleDownCooldown = scaleDownCDConf;
+                startDrain(1);
               }
             }
 
@@ -1162,10 +1189,7 @@ export function runSimulationTick(
 
             // Scale in reactively — never predict scale-in to avoid thrashing
             if (scalingEvent === null && loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
-              activeInstances--;
-              if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
-              scalingEvent      = 'down';
-              scaleDownCooldown = scaleDownCDConf;
+              startDrain(1);
             }
 
           } else {
@@ -1173,10 +1197,17 @@ export function runSimulationTick(
             if (loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst) {
               provisionDelta(1);
             } else if (loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst) {
-              activeInstances--;
-              if (warmPoolEnabled && warmPool > 0 && warmReserve < warmPool) warmReserve++;
-              scalingEvent      = 'down';
-              scaleDownCooldown = scaleDownCDConf;
+              startDrain(1);
+            }
+          }
+
+          // 4b. Warm-pool replenishment — if pool is below target and nothing already
+          //     provisioning for it, kick off a cold-provision cycle targeted at warmReserve
+          if (warmPoolEnabled && warmPool > 0 && pendingWarmInstances === 0) {
+            const deficit = warmPool - warmReserve;
+            if (deficit > 0) {
+              pendingWarmInstances = deficit;
+              warmPendingCountdown = coldTicks;
             }
           }
 
@@ -1190,7 +1221,9 @@ export function runSimulationTick(
           detail = {
             kind: 'app_server', cpuPct, memPct,
             activeInstances, pendingInstances, pendingCountdown,
-            warmReserve, scalingEvent,
+            drainingInstances, drainCountdown,
+            warmReserve, pendingWarmInstances, warmPendingCountdown,
+            scalingEvent,
             scaleUpCooldown, scaleDownCooldown,
             ...(projectedRps            !== undefined && { projectedRps }),
             ...(desiredInstancesDisplay !== undefined && { desiredInstances: desiredInstancesDisplay }),

@@ -69,7 +69,11 @@ export type ComponentDetail =
       activeInstances: number;
       pendingInstances: number;   // cold instances still provisioning
       pendingCountdown: number;   // ticks until pending are ready
-      warmReserve: number;        // warm-pool slots currently available
+      drainingInstances: number;  // instances in graceful shutdown (not serving new requests)
+      drainCountdown: number;     // ticks until draining instances are fully terminated
+      warmReserve: number;          // warm-pool slots currently available
+      pendingWarmInstances: number; // warm instances being provisioned (refilling pool)
+      warmPendingCountdown: number; // ticks until pending-warm are ready
       scalingEvent: 'up-warm' | 'up-cold' | 'down' | null;
       scaleUpCooldown: number;    // ticks remaining before next scale-up allowed
       scaleDownCooldown: number;  // ticks remaining before next scale-down allowed
@@ -153,6 +157,7 @@ export interface NodeConfig {
   scaleUpCooldownTicks?: number;   // ticks between scale-up events   (default 4 = 2 s)
   scaleDownCooldownTicks?: number; // ticks before a scale-in fires   (default 12 = 6 s)
   coldProvisionTicks?: number;     // ticks to provision a cold instance (default 6 = 3 s)
+  scaleDownDrainTicks?: number;   // ticks for graceful shutdown / connection drain (default 4 = 2 s)
   // Target Tracking autoscaling
   targetMetric?: TargetTrackingMetric; // default 'load'
   targetValue?: number;            // target %; default 70 for load/cpu, 500 for rps_per_instance

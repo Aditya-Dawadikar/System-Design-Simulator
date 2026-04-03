@@ -622,6 +622,24 @@ export default function AppServerFields({ nodeId }: AppServerFieldsProps) {
               </div>
             )}
 
+            {/* Scale-down drain time */}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>
+                Scale-Down Drain Time&nbsp;
+                <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
+                  ({((config.scaleDownDrainTicks ?? 4) * 0.5).toFixed(1)} s)
+                </span>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input type="range" min={1} max={20} value={config.scaleDownDrainTicks ?? 4}
+                  onChange={(e) => updateNodeConfig(nodeId, { scaleDownDrainTicks: Number(e.target.value) })}
+                  style={{ flex: 1, accentColor: 'var(--accent-cyan)', cursor: 'pointer' }} />
+                <input type="number" min={1} max={20} value={config.scaleDownDrainTicks ?? 4}
+                  onChange={(e) => updateNodeConfig(nodeId, { scaleDownDrainTicks: Number(e.target.value) })}
+                  style={numInputStyle('var(--accent-cyan)')} />
+              </div>
+            </div>
+
             {/* ── Warm Pool ──────────────────────────────────────── */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginTop: '4px' }}>
               <SectionToggleHeader

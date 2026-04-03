@@ -271,13 +271,15 @@ function ComponentDetailRow({ detail }: { detail: ComponentDetail }) {
       b = { label: 'SCALE', value: detail.scalingEvent ? 'YES' : 'NO', alert: detail.scalingEvent };
       break;
     case 'app_server': {
-      const instStr = detail.pendingInstances > 0
-        ? `${detail.activeInstances}+${detail.pendingInstances}`
-        : `${detail.activeInstances}`;
-      const warmStr = detail.warmReserve > 0 ? ` ~${detail.warmReserve}` : '';
+      let instStr = `${detail.activeInstances}`;
+      if (detail.pendingInstances > 0)  instStr += `+${detail.pendingInstances}`;
+      if (detail.drainingInstances > 0) instStr += `-${detail.drainingInstances}`;
+      const warmStr = (detail.warmReserve > 0 || detail.pendingWarmInstances > 0)
+        ? ` ~${detail.warmReserve}${detail.pendingWarmInstances > 0 ? `(+${detail.pendingWarmInstances})` : ''}`
+        : '';
       a = { label: 'CPU',  value: fmtPct(detail.cpuPct), alert: detail.cpuPct > 80 };
       b = { label: 'INST', value: `${instStr}${warmStr}`,
-            alert: detail.pendingInstances > 0 || detail.scalingEvent !== null };
+            alert: detail.pendingInstances > 0 || detail.drainingInstances > 0 || detail.scalingEvent !== null };
       break;
     }
     case 'cache':
