@@ -49,6 +49,21 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### Unit tests
+
+```bash
+# Run once
+npm run test:unit
+
+# Watch mode
+npm run test:unit:watch
+
+# Coverage report
+npm run test:unit:coverage
+```
+
+Test file convention: one test file per feature under `tests/features/`.
+
 ---
 
 ## How to use
