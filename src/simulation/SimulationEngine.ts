@@ -170,7 +170,10 @@ function topoSort(
 
   for (const edge of edges) {
     if (cyclingEdgeIds.has(edge.id)) continue;
-    if (!inDegree.has(edge.target)) continue;
+    // Ignore dangling edges that reference missing nodes.
+    // These were already excluded in adjacency building and should not affect
+    // in-degree bookkeeping for topological ordering.
+    if (!inDegree.has(edge.source) || !inDegree.has(edge.target)) continue;
     inDegree.set(edge.target, inDegree.get(edge.target)! + 1);
   }
 

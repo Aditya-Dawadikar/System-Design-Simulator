@@ -18,31 +18,31 @@ Legend:
 ## 2. Core Pipeline Stages
 
 ### 2.1 Adjacency and Cycle Handling
-- [ ] Builds upstream/downstream adjacency for valid edges
-- [ ] Ignores edges with missing source or target nodes
-- [ ] Detects cycle edges and excludes them from traversal effects
+- [x] Builds upstream/downstream adjacency for valid edges
+- [x] Ignores edges with missing source or target nodes
+- [x] Detects cycle edges and excludes them from traversal effects
 
 ### 2.2 Topological Ordering and Source Detection
-- [ ] Produces stable topological order for DAG inputs
-- [ ] Correctly marks source nodes (in-degree zero)
+- [x] Produces stable topological order for DAG inputs
+- [x] Correctly marks source nodes (in-degree zero)
 
 ### 2.3 Route Resolution Order
-- [ ] Service mesh route overrides applied first
-- [ ] API gateway route overrides applied after mesh
-- [ ] Health-aware redistribution can overwrite prior splitPct
-- [ ] Duplicate mesh routes dedupe by destNodeId using max weight
-- [ ] Duplicate gateway routes dedupe by destNodeId using max weight
+- [x] Service mesh route overrides applied first
+- [x] API gateway route overrides applied after mesh
+- [x] Health-aware redistribution can overwrite prior splitPct
+- [x] Duplicate mesh routes dedupe by destNodeId using max weight
+- [x] Duplicate gateway routes dedupe by destNodeId using max weight
 
 ### 2.4 Effective Region Failure Precomputation
-- [ ] regionFailed flag marks region as failed
-- [ ] Region auto-fails when all AZs in region are zoneFailed
-- [ ] Region remains healthy when at least one AZ is healthy
+- [x] regionFailed flag marks region as failed
+- [x] Region auto-fails when all AZs in region are zoneFailed
+- [x] Region remains healthy when at least one AZ is healthy
 
 ### 2.5 Health-Aware Redistribution
-- [ ] Load balancer redistributes equally across healthy targets
-- [ ] Load balancer sets splitPct=0 for failed targets
-- [ ] Global accelerator weights downstream by active zone count
-- [ ] Global accelerator keeps existing split when all downstream failed
+- [x] Load balancer redistributes equally across healthy targets
+- [x] Load balancer sets splitPct=0 for failed targets
+- [x] Global accelerator weights downstream by active zone count
+- [x] Global accelerator keeps existing split when all downstream failed
 
 ## 3. Shared Math and Invariants
 
