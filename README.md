@@ -13,14 +13,14 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 - **24 component types** — CDN, traffic generator, global accelerator, load balancer, API gateway, firewall, NAT gateway, public/private subnets, app servers, caches, databases, object/block/network storage, pub/sub, cloud functions, cron jobs, worker pools, rate limiters, service mesh, comments, regions, and availability zones
 - **AWS-aligned infrastructure scopes** — Region and Availability Zone containers with zone and region failure simulation; zonal vs. regional vs. global component classification; cross-zone (+2 ms) and cross-region (+75 ms) latency penalties on edges
 - **Live simulation** — 500 ms tick loop propagates RPS through the graph, computing load, latency, error rates, and component-specific detail metrics for every node
-- **App server autoscaling** — full FSM with four strategies: threshold (CPU/load triggers), target tracking (desired utilization), scheduled (tick-based pre-scaling actions), and predictive (linear trend extrapolation with pre-provisioning); warm pool for instant scale-out, cold provisioning countdown, min/max instance clamping
+- **App server autoscaling** — full FSM with four strategies: threshold (CPU/load triggers), target tracking (desired utilization), scheduled (tick-based pre-scaling actions), and predictive (linear trend extrapolation with pre-provisioning); warm pool with automatic replenishment for instant scale-out; cold provisioning countdown; graceful scale-down drain countdown; min/max instance clamping
 - **Traffic patterns** — steady, ramp, spike, wave, and chaos modes with per-node traffic generators
 - **API gateway routing** — path-prefix route table with per-destination weight, gateway-level response caching, and optional auth overhead; enables per-microservice traffic shaping
 - **Single-leader database replication** — assign each database node a role (standalone, primary, or replica); replicas are linked to a primary by node ID; writes are enforced to the primary only with write-rejection errors on replicas; replication lag tracks primary write load; linked replicas receive cross-zone/cross-region latency penalties on write routing
 - **Service mesh** — mTLS, per-hop proxy overhead, retry amplification, circuit breaking, and a weight-based routing table with automatic deduplication
 - **Rate limiter algorithms** — token bucket, leaky bucket, fixed window, sliding window, sliding log — each with distinct burst and queuing behavior
 - **Inspector panel** — per-component configuration with real-time field editing; scope-aware AZ / Region placement picker; per-edge protocol, timeout, retry, circuit breaker, and bandwidth settings
-- **Metrics dashboard** — global stats, per-node ArcGauge load indicators, RPS sparklines, P99 latency, error rate, and component detail rows
+- **Metrics dashboard** — global stats, per-node ArcGauge load indicators, RPS sparklines, P99 latency, error rate, component detail rows, and a live latency percentile chart (p50/p75/p90/p95/p99) per selected node
 - **Event log** — timestamped info / warn / error / k8s events with auto-scroll
 - **Drag-and-drop canvas** — React Flow canvas with zoom, pan, duplicate, and delete; architecture persisted to localStorage
 - **JSON import/export** — save and share architecture snapshots
@@ -99,7 +99,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | ⊘ | Rate Limiter | Regional | Algorithm, RPS limit, burst, queue size | Five rate-limiting algorithms with distinct burst tolerance and queue/drop behavior |
 | ⊛ | Service Mesh | Regional | mTLS, proxy overhead, retries, circuit breaker, routing table | Sidecar proxy latency; retry amplification; circuit breaking; weight-based traffic routing |
 | ◷ | Cron Job | Regional | Interval, tasks/run | Fixed-rate task emission; overlap detection when run duration exceeds interval |
-| ◈ | App Server | Zonal | Instances, CPU/RAM, workload type, autoscaling strategy | Compute capacity; IO wait back-pressure from downstream stores; FSM autoscaling with four strategies (threshold, target tracking, scheduled, predictive), warm pool, and cold provisioning countdown |
+| ◈ | App Server | Zonal | Instances, CPU/RAM, workload type, autoscaling strategy, drain ticks | Compute capacity; IO wait back-pressure from downstream stores; FSM autoscaling with four strategies (threshold, target tracking, scheduled, predictive); warm pool with continuous replenishment; cold provisioning countdown; graceful scale-down drain before termination |
 | ⚡ | Redis Cache | Zonal | Memory GB, TTL, eviction policy | Read absorption by hit rate; eviction rate under memory pressure |
 | ▣ | Database | Zonal | Engine, shards, role (standalone/primary/replica), primary node link, RPS/shard | Separate read/write load paths; single-leader replication with write-only primary and read-only replicas; write rejection on misrouted traffic; replication lag tracks primary write pressure; connection pool exhaustion; query queue depth |
 | ▤ | Block Storage | Zonal | Disk type, IOPS, IO size | IOPS cap with stateful queue depth; disk type latency (NVMe / SSD / HDD) |
