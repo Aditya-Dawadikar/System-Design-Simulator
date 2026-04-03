@@ -113,6 +113,8 @@ Every component has a **scope** (`ComponentScope = 'global' | 'regional' | 'zona
 | `rate_limiter` | Rate Limiter | ⊘ | `#c026d3` | regional | Throttles traffic across AZs |
 | `service_mesh` | Service Mesh | ⊛ | `#22d3ee` | regional | Sidecar proxy — mTLS, retries, circuit breaking |
 | `cron_job` | Cron Job | ◷ | `#34d399` | regional | Schedule-driven task emitter (EventBridge) |
+| `nat_gateway` | NAT Gateway | ⇢ | `#f97316` | regional | Private subnet egress with address translation |
+| `firewall` | Firewall | ⊟ | `#ef4444` | regional | Stateful packet inspection and traffic filtering |
 | `app_server` | App Server | ◈ | `#00ff88` | zonal | Compute instance in one AZ (EC2/ECS) |
 | `cache` | Redis Cache | ⚡ | `#ff8833` | zonal | In-memory cache node in one AZ (ElastiCache) |
 | `database` | PostgreSQL | ▣ | `#bb66ff` | zonal | Primary or replica DB in one AZ (RDS/Aurora) |
@@ -121,6 +123,8 @@ Every component has a **scope** (`ComponentScope = 'global' | 'regional' | 'zona
 | `worker_pool` | Worker Pool | ⚙ | `#facc15` | zonal | EC2-backed worker fleet in one AZ |
 | `region` | Region | ⬡ | `#c084fc` | global | Visual container grouping AZs (e.g. us-east-1) |
 | `availability_zone` | Availability Zone | ◎ | `#67e8f9` | global | Isolated failure domain within a region |
+| `public_subnet` | Public Subnet | ⬤ | `#4ade80` | global | Visual container — internet-facing subnet |
+| `private_subnet` | Private Subnet | ◯ | `#94a3b8` | global | Visual container — internal subnet via NAT |
 
 ---
 
@@ -173,16 +177,33 @@ avgLatencyMs?: number      // default 40
 workloadType?: 'cpu_bound' | 'io_bound' | 'memory_bound'  // default 'io_bound'
 
 // App Server — Autoscaling
-autoscalingEnabled?: boolean       // master toggle (default false)
-warmPoolEnabled?: boolean          // warm replica toggle (default false)
-minInstances?: number              // floor — always running
-maxInstances?: number              // ceiling — never exceed
-warmPoolSize?: number              // pre-provisioned instances (instant scale)
-scaleUpCpuPct?: number            // load% that triggers scale-out (default 75)
-scaleDownCpuPct?: number          // load% that triggers scale-in (default 25)
-scaleUpCooldownTicks?: number     // ticks between scale-up events (default 4 = 2 s)
-scaleDownCooldownTicks?: number   // ticks before scale-in fires (default 12 = 6 s)
-coldProvisionTicks?: number       // ticks to provision cold instance (default 6 = 3 s)
+autoscalingEnabled?: boolean         // master toggle (default false)
+autoscalingStrategy?: 'threshold' | 'target_tracking' | 'scheduled' | 'predictive'  // default 'threshold'
+warmPoolEnabled?: boolean            // warm replica toggle (default false)
+minInstances?: number                // floor — always running
+maxInstances?: number                // ceiling — never exceed
+warmPoolSize?: number                // pre-provisioned instances (instant scale)
+scaleUpCpuPct?: number              // threshold/scheduled/predictive: load% trigger scale-out (default 75)
+scaleDownCpuPct?: number            // threshold/scheduled/predictive: load% trigger scale-in (default 25)
+scaleUpCooldownTicks?: number       // ticks between scale-up events (default 4 = 2 s)
+scaleDownCooldownTicks?: number     // ticks before scale-in fires (default 12 = 6 s)
+coldProvisionTicks?: number         // ticks to provision cold instance (default 6 = 3 s)
+
+// App Server — Target Tracking autoscaling
+targetMetric?: 'load' | 'cpu' | 'rps_per_instance'  // default 'load'
+targetValue?: number                 // target % (load/cpu) or RPS (rps_per_instance); default 70
+ttScaleOutCooldownTicks?: number     // default 4 (2 s) — aggressive
+ttScaleInCooldownTicks?: number      // default 24 (12 s) — conservative
+
+// App Server — Scheduled autoscaling
+scheduledActions?: ScheduledScalingAction[]
+// ScheduledScalingAction: { id, atTick, intervalTicks?, desiredInstances?, minInstances?, maxInstances? }
+// Actions fire at atTick; repeat every intervalTicks if set; bypass all cooldowns
+
+// App Server — Predictive autoscaling
+predictiveLookbackTicks?: number    // history window for trend (default 20)
+predictiveLookaheadTicks?: number   // pre-provision horizon (default 10; should be ≥ coldProvisionTicks)
+predictiveScalingBuffer?: number    // % above projected need (default 20)
 
 // Cache
 memoryGb?: number          // default 8
@@ -194,10 +215,12 @@ clusterMode?: boolean
 engine?: 'PostgreSQL' | 'MySQL' | 'MongoDB' | 'Redis' | 'Cassandra'
 instanceType?: string      // e.g. 'db.m5.large'
 storageGb?: number         // default 100
-readReplicas?: number      // default 0
+readReplicas?: number      // default 0 — virtual replicas for standalone role only
 shards?: number            // default 1
 rpsPerShard?: number       // default 800
 maxConnections?: number    // default 200
+dbRole?: 'standalone' | 'primary' | 'replica'  // default 'standalone'
+primaryNodeId?: string     // replica only: node ID of the primary in this replication group
 
 // Cloud Storage
 storageThroughputMbps?: number   // default 1000
@@ -239,6 +262,7 @@ taskDurationMs?: number    // default 500
 generatorRps?: number      // default 1000
 generatorPattern?: TrafficPattern   // default 'steady'
 readRatioPct?: number      // 0–100, default 50
+badTrafficPct?: number     // 0–100, default 0 — malicious traffic fraction for firewall
 
 // Rate Limiter
 rateLimitAlgorithm?: 'token_bucket' | 'leaky_bucket' | 'fixed_window' | 'sliding_window' | 'sliding_log'
@@ -265,6 +289,18 @@ meshRoutes?: Array<{
 routingPolicy?: 'latency' | 'geo' | 'weighted'
 failoverEnabled?: boolean
 
+// NAT Gateway
+natBandwidthGbps?: number    // default 10
+// maxConnections also applies (default 55000)
+
+// Firewall
+firewallRules?: number                           // default 10
+firewallInspectionMode?: 'basic' | 'deep'        // default 'basic'
+firewallBlockRatePct?: number                    // 0–100, default 0
+
+// Public / Private Subnet (containers)
+subnetCidr?: string   // e.g. '10.0.1.0/24' — display only
+
 // Comment
 commentBody?: string
 ```
@@ -281,7 +317,11 @@ circuitBreaker: boolean                             // default false
 circuitBreakerThreshold: number                     // default 50
 bandwidthMbps: number                               // default 0 (unlimited)
 splitPct?: number                                   // 0–100; undefined = auto equal-split
+readSplitPct?: number                               // 0–100; read-traffic override for this edge
+writeSplitPct?: number                              // 0–100; write-traffic override for this edge
 ```
+
+`readSplitPct` and `writeSplitPct` allow separate routing splits for read vs write traffic, enabling primary/replica topologies to be modeled at the edge level.
 
 ---
 
@@ -301,6 +341,8 @@ interface NodeMetrics {
   readRatio: number          // fraction 0–1 propagated from traffic_generator
   readRpsIn: number          // rpsIn × readRatio
   writeRpsIn: number         // rpsIn × (1 − readRatio)
+  badRatio: number           // fraction of malicious traffic (from traffic_generator)
+  badRpsIn: number           // rpsIn × badRatio
   readLoad?: number          // database only
   writeLoad?: number         // database only
   detail?: ComponentDetail
@@ -314,9 +356,9 @@ interface NodeMetrics {
 | `cdn` | `cacheHitRate`, `originBypassRps`, `bandwidthGbps` |
 | `load_balancer` | `activeConnections`, `scalingEvent: boolean`, `connectionsPerSecond`, `failedTargets`, `availableZones`, `totalZones`, `noZonesAvailable` |
 | `api_gateway` | `activeRoutes`, `routedRps`, `throttledRps`, `cacheHitRate` |
-| `app_server` | `cpuPct`, `memPct`, `activeInstances`, `pendingInstances`, `pendingCountdown`, `warmReserve`, `scalingEvent: 'up-warm'\|'up-cold'\|'down'\|null`, `scaleUpCooldown`, `scaleDownCooldown` |
+| `app_server` | `cpuPct`, `memPct`, `activeInstances`, `pendingInstances`, `pendingCountdown`, `warmReserve`, `scalingEvent: 'up-warm'\|'up-cold'\|'down'\|null`, `scaleUpCooldown`, `scaleDownCooldown`, `projectedRps?` (predictive only), `desiredInstances?` (target_tracking + predictive) |
 | `cache` | `hitRate`, `evictionRate`, `memoryUsedPct` |
-| `database` | `connectionPoolUsed`, `connectionPoolMax`, `queryQueueDepth`, `slowQueryRate` |
+| `database` | `connectionPoolUsed`, `connectionPoolMax`, `queryQueueDepth`, `slowQueryRate`, `replicationLagMs`, `writeRejectedRps?`, `writeRoutingLatency?` |
 | `cloud_storage` | `throttledRequests`, `bandwidthUtilization` |
 | `block_storage` | `iopsUsed`, `iopsLimit`, `queueDepth`, `throughputMbps` |
 | `network_storage` | `activeConnections`, `bandwidthUsedMbps`, `throughputLimitMbps` |
@@ -327,6 +369,8 @@ interface NodeMetrics {
 | `rate_limiter` | `allowedRps`, `throttledRps`, `throttleRate`, `queueDepth` (stateful for queuing algos) |
 | `service_mesh` | `activeConnections`, `mtlsHandshakeRate`, `circuitBroken`, `retryRate` |
 | `global_accelerator` | `activeRegions`, `failedRegions`, `reroutedRps` |
+| `nat_gateway` | `translatedConnections`, `bandwidthUtilizationPct`, `droppedPackets` |
+| `firewall` | `allowedRps`, `blockedRps`, `autoDetectedRps`, `manualBlockedRps`, `detectionEfficiency` |
 
 ---
 
@@ -339,7 +383,8 @@ export function runSimulationTick(
   topology: Topology,            // { nodes, edges, nodeConfigs, edgeConfigs }
   incomingRps: number,           // global RPS × traffic pattern multiplier
   tick = 0,
-  previousMetrics: Record<string, NodeMetrics> = {}   // required for stateful components
+  previousMetrics: Record<string, NodeMetrics> = {},   // required for stateful components
+  nodeHistory: Record<string, number[]> = {}            // rpsIn history per node; required for predictive autoscaling
 ): { nodeMetrics: Record<string, NodeMetrics>; edgeMetrics: Record<string, EdgeMetrics> }
 ```
 
@@ -360,7 +405,7 @@ export function runSimulationTick(
 - `traffic_generator` — uses own `generatorRps × pattern multiplier`
 - `cron_job` — `tasksPerRun / (intervalMinutes × 60)` fixed rate; ignores global RPS
 - Other nodes with no upstream — receive `incomingRps`
-- All other nodes — sum upstream contributions weighted by `splitPct`
+- All other nodes — sum upstream contributions weighted by `splitPct` / `readSplitPct` / `writeSplitPct`
 
 ### Zone / region failure injection
 
@@ -404,7 +449,9 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | API Gateway | `50000` fixed |
 | App Server | `instances × min(cpuCores, ramGb×0.5) × 300` (used by `computeCapacity`; tick uses `rpsPerInstance` override if set) |
 | Cache | `100000` fixed (`CACHE_RPS_MAX`) |
-| Database | `shards × rpsPerShard + readReplicas × rpsPerShard` |
+| Database (standalone) | `shards × rpsPerShard + readReplicas × rpsPerShard` |
+| Database (primary) | `shards × rpsPerShard` (actual replicas are separate nodes) |
+| Database (replica) | `shards × rpsPerShard` (read-only capacity) |
 | Cloud Storage | `(throughputMbps × 1000/8) / objectSizeKb` ops/sec |
 | Block Storage | `iops` |
 | Network Storage | `(throughputMbps × 1000/8) / ioSizeKb` ops/sec |
@@ -416,7 +463,9 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Rate Limiter | `requestsPerSecond` (placeholder; load overridden in tick) |
 | Service Mesh | `∞` (pass-through; load derived from proxy overhead fraction) |
 | Global Accelerator | `500000` |
-| Region / AZ | `∞` (structural containers) |
+| NAT Gateway | `natBandwidthGbps × 5000` |
+| Firewall | `firewallRules × (inspectionMode === 'deep' ? 500 : 1000)` |
+| Region / AZ / Subnets | `∞` (structural containers) |
 
 ### Base latencies (ms)
 
@@ -439,7 +488,9 @@ Applied to `app_server`, `cloud_function`, `worker_pool`. Reads previous-tick la
 | Rate Limiter | 1 | — |
 | Service Mesh | 2 | `proxyOverheadMs` |
 | Global Accelerator | 5 | — |
-| Region / AZ | 0 | — |
+| NAT Gateway | 3 | — |
+| Firewall | 2 | `inspectionMode`: basic=2, deep=10 |
+| Region / AZ / Subnets | 0 | — |
 
 ---
 
@@ -452,24 +503,46 @@ Cache hit rate = `(cacheablePct/100) × max(0.4, 1 − degradation)` where degra
 Passes traffic minus drop rate. `activeConnections ≈ rpsIn × 0.05`, capped at `maxConnections`. Sets `scalingEvent = true` when `load > 0.75`. Health-check redistribution (pre-BFS step 6) routes away from failed downstream nodes; `failedTargets` and `noZonesAvailable` tracked in detail.
 
 ### API Gateway
-`cacheHitRate = gatewayCacheHitPct/100` (reads only, when `gatewayCacheEnabled`). `readRpsOut = readRpsIn × (1 − cacheHitRate) × (1 − dropRate)`. `writeRpsOut = writeRpsIn × (1 − dropRate)`. Auth overhead (`gatewayAuthOverheadMs`) added to `latencyMs` when `gatewayAuthEnabled`. `gatewayRoutes` resolved in pre-BFS step 4 — deduplicates by `destNodeId` (max weight wins); weights normalized to 100% and applied as `splitPct` overrides on downstream edges.
+`cacheHitRate = gatewayCacheHitPct/100` (reads only, when `gatewayCacheEnabled`). `readRpsOut = readRpsIn × (1 − cacheHitRate) × (1 − dropRate)`. `writeRpsOut = writeRpsIn × (1 − dropRate)`. Auth overhead added to `latencyMs` when `gatewayAuthEnabled`. `gatewayRoutes` resolved in pre-BFS step 4.
 
 ### App Server (static, `autoscalingEnabled = false`)
 `effectiveCap = instances × perInstRps × ioScale`. IO wait from downstream stores added to latency.
 
-`workloadType` changes three things:
-- **IO wait weight**: `cpu_bound=0.1`, `memory_bound=0.35`, `io_bound=1.0`
-- **Nominal RPS per instance** (when `rpsPerInstance` not set): `cpu_bound=cpuCores×350`, `memory_bound=min(cpuCores×300, ramGb×100)`, `io_bound=cpuCores×500`
-- **`cpuPct`/`memPct` display**: `cpu_bound` saturates CPU fast; `memory_bound` saturates memory fast; `io_bound` both moderate
+### App Server Autoscaling — Four Strategies
 
-### App Server (autoscaling FSM)
-See "App Server Autoscaling FSM" section below.
+All strategies share the same state fields threaded through `prevD` each tick: `activeInstances`, `pendingInstances`, `pendingCountdown`, `warmReserve`, `scaleUpCooldown`, `scaleDownCooldown`.
+
+**Common FSM steps (all strategies):**
+1. Promote pending: decrement `pendingCountdown`; when 0, move pending to active (clamped to maxInst)
+2. Decrement cooldowns
+3. Compute `effectiveCap = activeInstances × perInstRps`, `dynamicLoad`, `cpuPct/memPct`
+
+**`threshold`** (default): Scale out when `loadPct > scaleUpCpuPct`; scale in when `loadPct < scaleDownCpuPct`. One instance at a time via `provisionDelta(1)`.
+
+**`target_tracking`**: Compute `desiredInstances` from `targetMetric` and `targetValue` each tick. Scale out by `desiredInstances − totalProvisioned` in one shot via `provisionDelta(delta)`. Scale in directly to `desiredInstances`. Uses `ttScaleOutCooldownTicks` (default 4, short) and `ttScaleInCooldownTicks` (default 24, long).
+
+**`scheduled`**: Fire matching `scheduledActions` at `atTick` (or every `intervalTicks`). Scheduled fires bypass cooldowns and set `activeInstances` instantly. Threshold fallback (`scaleUpCpuPct`/`scaleDownCpuPct`) runs as safety net between scheduled actions.
+
+**`predictive`**: Use `linRegSlope` over last `predictiveLookbackTicks` values from `nodeHistory` to project `rpsIn` forward by `predictiveLookaheadTicks`. Scale out proactively to `ceil(projectedRps × (1 + buffer) / perInstRps)` via `provisionDelta`. Scale in is always reactive (threshold-based) to avoid thrashing. Activates after `ceil(lookback/2)` history points accumulate.
+
+**`provisionDelta(delta)` helper** (shared by all strategies): Consumes warm pool first; remaining delta cold-provisions. Sets `scaleUpCooldown = scaleUpCDConf`.
+
+**Scale trigger uses `loadPct` (not `cpuPct`)** so IO-bound and memory-bound workloads scale correctly.
 
 ### Cache
 Hit rate scales with `memoryGb` (up to 85%). Under load, eviction rate rises above 80% memory used, degrading hit rate. Reads absorbed by hit rate; writes pass through.
 
-### Database
-Separate read/write loads: reads served by primary + replicas, writes by primary only. `load = max(readLoad, writeLoad)`. Connection pool = `(shards + replicas) × 100`. Query queue depth adds latency. Slow query rate rises above 60% load.
+### Database — Single-Leader Replication
+
+Three roles set via `dbRole`:
+
+**`standalone`** (default, backward-compatible): Existing behavior. `readCapacity = (shards + readReplicas) × rpsPerShard`. Separate read/write loads; `load = max(readLoad, writeLoad)`. Virtual `readReplicas` count boosts read capacity.
+
+**`primary`**: No virtual readReplicas (actual replicas are separate nodes). `capacity = shards × rpsPerShard`. Serves both reads and writes. Same load/pool/queue calculation as standalone without the readReplicas bonus.
+
+**`replica`** with `primaryNodeId` set: Internally routes writes to primary with cross-zone (+2 ms) or cross-region (+75 ms) latency overhead. Reads served locally. If primary is failed, writes are rejected (`writeRejectedRps = writeRpsIn`, `errorRate = writeRpsIn / rpsIn`). Replication lag = `max(0, (primaryWriteLoad - 0.3) / 0.7 × 500)` ms — grows from 0 at 30% primary write load to 500 ms at 100%. Stale-read overhead adds `replicationLagMs × 0.05` to latency.
+
+**`replica`** without `primaryNodeId`: Read-only. Any write traffic is rejected and raises `errorRate`. No internal routing.
 
 ### Cloud Storage
 ~10% of RPS emitted downstream as event notifications. `throttledRequests = max(0, rpsIn - capacity)`. Bandwidth utilization tracked.
@@ -503,37 +576,22 @@ Five algorithms with different burst/queue behaviors:
 | `sliding_window` | `rpsLimit × 1.2` | No — excess immediately dropped (429) |
 | `sliding_log` | `rpsLimit` | No — excess immediately dropped; +2 ms bookkeeping |
 
-`rpsOut` is always hard-capped at `requestsPerSecond` regardless of algorithm. **Stateful** queue for `token_bucket` and `leaky_bucket`. `load` = queue fill fraction (queuing algos) or `rpsIn / instantCap` (window algos). `errorRate = throttleRate`.
+`rpsOut` always hard-capped at `requestsPerSecond`. **Stateful** queue for `token_bucket` and `leaky_bucket`.
 
 ### Service Mesh
-Pass-through proxy layer. Latency = `proxyOverheadMs × 2` (two sidecar hops) + observability overhead (`none=0`, `basic=0.5`, `full=1` ms) + mTLS overhead (~1 ms if enabled). Retries amplify downstream RPS when upstream errors occur (`retryRps += errorRps × meshRetryCount`). Circuit breaker: when error rate exceeds `meshCircuitBreakerThreshold%`, `circuitBroken = true` — traffic is fast-failed. Routing table overrides edge `splitPct` for matched `destNodeId` entries; duplicate dest pairs are resolved by max weight.
+Pass-through proxy. Latency = `proxyOverheadMs × 2` + observability overhead + mTLS (~1 ms). Circuit breaker watches **downstream** error rate (not mesh's own load). When tripped: `rpsOut = rpsIn × 0.05`, `errorRate = 0.95`, `failed = false` (mesh is healthy, acting correctly). Retries amplify downstream RPS; `errorRate = pow(downstreamErrorRate, retries + 1)`.
+
+### Firewall
+`detectionEfficiency = min(1, rules × (deep ? 0.05 : 0.04))`. Auto-blocks `badRatio × detectionEfficiency` of traffic; manual block rate adds to total. `badRatioOut = 0` (bad traffic scrubbed from `badRatio`).
 
 ### Global Accelerator
 Health-aware proportional routing (pre-BFS step 6). Each downstream region weighted by its active zone count. Failed regions get weight 0. `reroutedRps` tracks traffic shifted away from failed endpoints.
 
-### Region / Availability Zone
-Structural container nodes — transparent pass-through with no simulation effect (`load=0`, `failed=false`, `rpsOut=rpsIn`). Zone failure applied before processing each resource node. Region failure pre-computed from `regionFailed` flag or all-zones-failed condition.
+### NAT Gateway
+Connection tracking: `translatedConnections ≈ rpsIn × 0.1`, capped at `maxConnections`. Bandwidth utilization = `rpsIn / (natBwGbps × 5000)`. Dropped packets when over capacity.
 
----
-
-## App Server Autoscaling FSM
-
-Only active when `autoscalingEnabled = true`. State threads through `detail` via `previousMetrics` each tick.
-
-### Per-tick order
-
-1. **Promote pending**: decrement `pendingCountdown`; when it reaches 0, move `pendingInstances` to `activeInstances` (clamped to `maxInst`)
-2. **Decrement cooldowns**: `scaleUpCooldown--`, `scaleDownCooldown--`
-3. **Compute load**: `effectiveCap = activeInstances × perInstRps × ioScale`; `loadPct = dynamicLoad × 100`
-4. **Scale-up**: if `loadPct > scaleUpThr && scaleUpCooldown === 0 && totalProvisioned < maxInst`:
-   - Warm available (`warmPoolEnabled && warmReserve > 0`) → instant: `activeInstances++`, `warmReserve--`, event = `'up-warm'`
-   - Otherwise → cold: `pendingInstances = 1`, `pendingCountdown = coldProvisionTicks`, event = `'up-cold'`
-   - Set `scaleUpCooldown = scaleUpCooldownTicks`
-5. **Scale-down**: if `loadPct < scaleDownThr && scaleDownCooldown === 0 && activeInstances > minInst`:
-   - `activeInstances--`, optionally refill `warmReserve`, event = `'down'`
-   - Set `scaleDownCooldown = scaleDownCooldownTicks`
-
-**Note**: The scale trigger uses `loadPct` (not `cpuPct`) so `io_bound` and `memory_bound` workloads scale correctly — `cpuPct` for `io_bound` only reaches ~50% at full load, which would never cross a 75% threshold.
+### Region / Availability Zone / Subnets
+Structural container nodes — transparent pass-through (`load=0`, `failed=false`, `rpsOut=rpsIn`). Zone/region failures applied before processing each resource node.
 
 ---
 
@@ -562,11 +620,9 @@ Each `ComponentDefinition` has a `scope: ComponentScope` field. The Inspector's 
 - `global` → hidden
 
 ### NodeLocationBadge
-Shared component (`src/components/shared/NodeLocationBadge.tsx`) rendered at the bottom of every resource node card. Shows `◎ us-east-1a` (cyan) when `zoneId` is set, or `⬡ us-east-1` (purple) when `regionId` is set.
+Shared component rendered at the bottom of every resource node card. Shows `◎ us-east-1a` (cyan) when `zoneId` is set, or `⬡ us-east-1` (purple) when `regionId` is set.
 
 ### Cross-zone / cross-region latency (edge metrics)
-In the edge metrics pass, the engine builds `nodeZoneIdMap` and `nodeRegionIdMap` from `nodeConfigs`. A node's region is inferred via `nodeConfigs[node.zoneId]?.regionId`.
-
 - Source and target in **different zones, same region** → `+2 ms`
 - Source and target in **different regions** → `+75 ms`
 
@@ -578,8 +634,8 @@ Set `zoneFailed: true` on an `availability_zone` node's config, or `regionFailed
 ## Simulation store (`src/store/simulationStore.ts`)
 
 - Tick interval: **500 ms**
-- Passes `get().nodeMetrics` as `previousMetrics` to `runSimulationTick`
-- RPS history: last **40 points** per node
+- Passes `get().nodeMetrics` as `previousMetrics` and `get().history` as `nodeHistory` to `runSimulationTick`
+- RPS history: last **40 points** per node (used by predictive autoscaling)
 - Event log: last **100 events**; levels: `'info'`, `'warn'`, `'error'`, `'k8s'`
 
 ### Event generation triggers
@@ -593,12 +649,17 @@ Set `zoneFailed: true` on an `availability_zone` node's config, or `regionFailed
 | cloud_function cold starts appear | warn | Concurrency ramp |
 | cloud_function throttled invocations appear | error | Max concurrency reached |
 | database queryQueueDepth goes from 0 to >0 | error | Connection pool exhausted |
+| database writeRejectedRps goes from 0 to >0 | error | Writes arriving at replica |
+| database writeRejectedRps drops to 0 | info | Replica healthy |
+| database replicationLagMs crosses 200 ms | warn | Primary write load high |
 | worker_pool backlog crosses 2000 ms | warn | Queue depth included |
 | app_server scalingEvent changes | k8s | warm/cold/down message |
 | load_balancer scalingEvent fires | k8s | Auto-scale signal |
 | load_balancer failedTargets goes from 0 to >0 | warn | Health check rerouting |
 | load_balancer noZonesAvailable becomes true | error | All zones down |
 | global_accelerator failedRegions goes from 0 to >0 | warn | Failover active |
+| firewall blockedRps goes from 0 to >0 | warn | Traffic being blocked |
+| nat_gateway droppedPackets goes from 0 to >0 | warn | Bandwidth limit reached |
 
 ---
 
@@ -617,7 +678,7 @@ Set `zoneFailed: true` on an `availability_zone` node's config, or `regionFailed
    - Add to `computeCapacity` switch
    - Set `rpsOut`, override `load`, `failed`, `errorRate`, `latencyMs` if needed
    - Set `detail` if the type has a `ComponentDetail` variant
-   - If it needs pre-BFS routing (like `api_gateway`/`service_mesh`): add a routing resolution block between steps 3 and 5 in the processing order
+   - If it needs pre-BFS routing: add a routing resolution block between steps 3 and 5 in the processing order
 10. Thread stateful components by reading `prevNodeMetrics?.detail` and storing state in `detail`
 11. Add event generation in `simulationStore.ts` if the type has component-specific failure events
 12. Add to `COMPONENT_CATEGORY` in `ComponentLibrary.tsx`
@@ -631,13 +692,16 @@ Set `zoneFailed: true` on an `availability_zone` node's config, or `regionFailed
 - **CSS import order** — Google Fonts `@import` in `globals.css` must precede `@tailwindcss/postcss`. Reversing breaks font loading.
 - **React Flow node registration** — every new `ComponentType` must be added to the `nodeTypes` object in `Canvas.tsx`. Missing registration causes React Flow to render a generic fallback node.
 - **`previousMetrics` threading** — stateful components (`app_server`, `pubsub`, `cloud_function`, `worker_pool`, `block_storage`, `rate_limiter`, `service_mesh`) rely on previous-tick `detail`. Always pass `get().nodeMetrics`; never pass `{}`.
+- **`nodeHistory` threading** — predictive autoscaling reads `nodeHistory[node.id]` for the last 40 rpsIn values. Always pass `get().history` from simulationStore; never pass `{}`.
 - **Traffic pattern sync** — `getTrafficMultiplier` is duplicated in both `SimulationEngine.ts` and `simulationStore.ts`. Changing one requires updating the other.
 - **`p99LatencyMs = latencyMs × 2.5`** — fixed multiplier, computed at end of each node's tick.
 - **Autoscaling scale trigger uses `loadPct`, not `cpuPct`** — `scaleUpCpuPct`/`scaleDownCpuPct` config fields are compared against `dynamicLoad × 100`, not the displayed `cpuPct`. This is intentional so IO-bound workloads scale correctly.
 - **`computeCapacity` vs tick capacity** — `computeCapacity` for `app_server` uses `min(cpuCores, ramGb×0.5) × 300` and ignores `rpsPerInstance`. The tick case uses `rpsPerInstance` if set. These can diverge; the tick value is what actually determines simulation behavior.
-- **API gateway route deduplication** — `gatewayRoutes` deduplicates by `destNodeId` (max weight wins). Multiple routes to the same dest are shadowed in the UI and collapsed in the engine. When routing to per-AZ replicas (e.g. users-a and users-b), each dest ID is unique so all routes are effective.
-- **Service mesh routing deduplication** — `meshRoutes` supports `sourceNodeId` for UI display. The simulation engine deduplicates by `destNodeId` only (max weight wins). The inspector UI marks lower-weight duplicate rules as "SHADOWED".
-- **Region/AZ nodes are not React Flow parent nodes** — zone membership is stored in `nodeConfig.zoneId` / `nodeConfig.regionId`, not via React Flow's `parentNode`. The containers are purely visual; resource nodes are not children in the React Flow sense.
-- **NodeLocationBadge scope** — do not add `NodeLocationBadge` to `RegionNode` or `AvailabilityZoneNode` (they are the containers, not resource nodes).
-- **`scope` field required** — every new `ComponentDefinition` must include a `scope` value. The `NodeLocationField` in `Inspector.tsx` reads it from `COMPONENT_BY_TYPE[type].scope` to decide which picker to show.
-- **Pre-BFS routing resolution order** — service mesh routes are resolved first (step 3), then API gateway routes (step 4, labelled 4.55 in engine comments), then health-aware redistribution (step 5/6). Later steps overwrite earlier `splitPct` values for the same edge. If a service mesh and an API gateway both have edges to the same downstream, the last resolver wins.
+- **API gateway route deduplication** — `gatewayRoutes` deduplicates by `destNodeId` (max weight wins). Multiple routes to the same dest are shadowed.
+- **Service mesh routing deduplication** — `meshRoutes` deduplicates by `destNodeId` only (max weight wins). The inspector UI marks lower-weight duplicate rules as "SHADOWED".
+- **Region/AZ nodes are not React Flow parent nodes** — zone membership is stored in `nodeConfig.zoneId` / `nodeConfig.regionId`, not via React Flow's `parentNode`. The containers are purely visual.
+- **NodeLocationBadge scope** — do not add `NodeLocationBadge` to `RegionNode`, `AvailabilityZoneNode`, `PublicSubnetNode`, or `PrivateSubnetNode` (they are containers, not resource nodes).
+- **`scope` field required** — every new `ComponentDefinition` must include a `scope` value.
+- **Pre-BFS routing resolution order** — service mesh routes resolved first (step 3), then API gateway routes (step 4), then health-aware redistribution (step 5/6). Later steps overwrite earlier `splitPct` values for the same edge.
+- **Database `dbRole` defaults to `'standalone'`** — existing architectures without `dbRole` set continue to work unchanged. Only set `'primary'` or `'replica'` when modeling explicit single-leader replication groups. The `readReplicas` virtual-count field is only meaningful for `standalone`; it is ignored for `primary` and `replica`.
+- **Replica `primaryNodeId` required for write routing** — a `replica` without `primaryNodeId` rejects all writes immediately. With `primaryNodeId` set, writes are internally forwarded to the primary with cross-zone/cross-region latency; if the primary is failed, writes are rejected.
