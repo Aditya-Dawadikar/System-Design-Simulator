@@ -102,77 +102,68 @@ function computeZoneRegionErrorRates(
   return result;
 }
 
+// Node types that inject traffic into the system (the "entry boundary").
+const SOURCE_TYPES = new Set(['traffic_generator', 'cron_job']);
+
+// Node types that are never counted in error tallies (containers + sources).
+const SKIP_ERROR_TYPES = new Set([
+  'region', 'availability_zone', 'public_subnet', 'private_subnet',
+  'comment', 'traffic_generator', 'cron_job',
+]);
+
 /**
- * Global error rate = weighted avg across all non-container resource nodes,
- * propagated upward through zone → region → global hierarchy.
+ * Global error rate — fraction of system-entry traffic that fails somewhere
+ * in the call chain.
+ *
+ * Formula:  Σ(rpsIn × errorRate)  /  Σ(rpsOut of source nodes)
+ *
+ * Each failed request is counted exactly once at the node where it fails.
+ * Pass-through nodes (CDN, LB, API GW) with errorRate=0 contribute nothing,
+ * so a fully-failed backend correctly produces 100% even if the CDN is alive.
+ *
+ * Falls back to a simple weighted average when no source nodes are present.
  */
 function computeGlobalErrorRate(
   nodeMetrics: Record<string, NodeMetrics>,
   nodes: Node[],
-  nodeConfigs: Record<string, NodeConfig>,
-  propagatedErrorRates: Record<string, number>
 ): number {
-  const regionNodes = nodes.filter(n => n.type === 'region');
-
-  if (regionNodes.length === 0) {
-    // No regions: simple weighted avg over all non-container nodes
-    const resourceNodes = nodes.filter(n => !CONTAINER_TYPES.has(String(n.type)));
-    const totalRps = resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
-    return totalRps === 0 ? 0 :
-      resourceNodes.reduce((s, n) => s + (nodeMetrics[n.id]?.errorRate || 0) * (nodeMetrics[n.id]?.rpsIn || 0), 0) / totalRps;
-  }
-
-  // Nodes that belong to a region (directly or via a zone)
-  const zoneNodes = nodes.filter(n => n.type === 'availability_zone');
-  const regionNodeIds = new Set(regionNodes.map(r => r.id));
-  const affiliatedIds = new Set<string>();
+  // Total traffic injected by source nodes
+  let sourceRps = 0;
   for (const n of nodes) {
-    const cfg = nodeConfigs[n.id];
-    if (cfg?.regionId && regionNodeIds.has(cfg.regionId)) affiliatedIds.add(n.id);
-    if (cfg?.zoneId) {
-      const zoneCfg = nodeConfigs[cfg.zoneId];
-      if (zoneCfg?.regionId && regionNodeIds.has(zoneCfg.regionId)) affiliatedIds.add(n.id);
+    if (SOURCE_TYPES.has(String(n.type))) {
+      sourceRps += nodeMetrics[n.id]?.rpsOut ?? 0;
     }
   }
 
-  let totalRps = 0;
-  let weightedSum = 0;
-
-  // Region contributions
-  for (const region of regionNodes) {
-    const zonesInRegion = zoneNodes.filter(n => nodeConfigs[n.id]?.regionId === region.id);
-    const zonalIds = new Set(zonesInRegion.map(z => z.id));
-    const regionRps = nodes
-      .filter(n => {
-        if (CONTAINER_TYPES.has(String(n.type))) return false;
-        const cfg = nodeConfigs[n.id];
-        if (cfg?.regionId === region.id && !cfg?.zoneId) return true;
-        if (cfg?.zoneId && zonalIds.has(cfg.zoneId)) return true;
-        return false;
-      })
-      .reduce((s, n) => s + (nodeMetrics[n.id]?.rpsIn || 0), 0);
-    totalRps += regionRps;
-    weightedSum += (propagatedErrorRates[region.id] || 0) * regionRps;
-  }
-
-  // Unaffiliated non-container nodes (global nodes not in any region)
+  // Sum of failed requests across all processing nodes
+  let failedRps = 0;
   for (const n of nodes) {
-    if (CONTAINER_TYPES.has(String(n.type))) continue;
-    if (affiliatedIds.has(n.id)) continue;
+    if (SKIP_ERROR_TYPES.has(String(n.type))) continue;
     const m = nodeMetrics[n.id];
     if (!m) continue;
-    totalRps += m.rpsIn || 0;
-    weightedSum += (m.errorRate || 0) * (m.rpsIn || 0);
+    failedRps += m.rpsIn * m.errorRate;
   }
 
-  return totalRps === 0 ? 0 : weightedSum / totalRps;
+  if (sourceRps > 0) {
+    return Math.min(1, failedRps / sourceRps);
+  }
+
+  // Fallback: no source nodes — simple weighted average over processing nodes
+  let totalRps = 0;
+  let weightedErr = 0;
+  for (const n of nodes) {
+    if (SKIP_ERROR_TYPES.has(String(n.type))) continue;
+    const m = nodeMetrics[n.id];
+    if (!m) continue;
+    totalRps   += m.rpsIn;
+    weightedErr += m.rpsIn * m.errorRate;
+  }
+  return totalRps === 0 ? 0 : weightedErr / totalRps;
 }
 
 function computeGlobalMetrics(
   nodeMetrics: Record<string, NodeMetrics>,
   nodes: Node[],
-  nodeConfigs: Record<string, NodeConfig>,
-  propagatedErrorRates: Record<string, number>
 ): GlobalMetrics {
   const all = Object.values(nodeMetrics);
 
@@ -182,7 +173,7 @@ function computeGlobalMetrics(
 
   const liveRps       = Math.max(...all.map((m) => m.rpsIn));
   const e2eLatencyMs  = all.reduce((sum, m) => sum + m.latencyMs, 0);
-  const errRate       = computeGlobalErrorRate(nodeMetrics, nodes, nodeConfigs, propagatedErrorRates);
+  const errRate       = computeGlobalErrorRate(nodeMetrics, nodes);
   const maxLoad       = Math.max(...all.map((m) => m.load));
   const anyFailed     = all.some((m) => m.failed);
 
@@ -228,8 +219,8 @@ export default function MetricsDashboard() {
     [nodeMetrics, nodes, nodeConfigs]
   );
   const global = useMemo(
-    () => computeGlobalMetrics(nodeMetrics, nodes, nodeConfigs, propagatedErrorRates),
-    [nodeMetrics, nodes, nodeConfigs, propagatedErrorRates]
+    () => computeGlobalMetrics(nodeMetrics, nodes),
+    [nodeMetrics, nodes]
   );
   const globalRpsHistory   = useGlobalRpsHistory(nodeMetrics, tick, 100);
   const globalErrorHistory = useGlobalErrorRateHistory(global.errRate, tick, 100);
