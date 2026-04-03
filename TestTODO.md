@@ -9,11 +9,11 @@ Legend:
 
 ## 1. Test Harness and Fixtures
 
-- [ ] Add deterministic topology builders (nodes, edges, nodeConfigs, edgeConfigs)
-- [ ] Add helper assertions for float comparisons (latency and ratios)
-- [ ] Add helpers for previousMetrics and nodeHistory setup
-- [ ] Add fixtures for multi-AZ and multi-region layouts
-- [ ] Add fixtures for read/write split routing graphs
+- [x] Add deterministic topology builders (nodes, edges, nodeConfigs, edgeConfigs)
+- [x] Add helper assertions for float comparisons (latency and ratios)
+- [x] Add helpers for previousMetrics and nodeHistory setup
+- [x] Add fixtures for multi-AZ and multi-region layouts
+- [x] Add fixtures for read/write split routing graphs
 
 ## 2. Core Pipeline Stages
 
