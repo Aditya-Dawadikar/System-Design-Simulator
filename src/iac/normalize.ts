@@ -48,7 +48,8 @@ function normalizeDeployDefaults(deploy: IacResource['deploy']): IacResource['de
 
   // If autoscaling is disabled and has no other fields, strip it
   if (!autoscaling.enabled) {
-    const { enabled, ...rest } = autoscaling;
+    const { enabled: _enabled, ...rest } = autoscaling;
+    void _enabled;
     const hasOtherFields = Object.keys(rest).length > 0;
     if (!hasOtherFields) {
       const { autoscaling: _unused, ...deployWithout } = deploy;

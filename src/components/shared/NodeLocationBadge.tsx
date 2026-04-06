@@ -18,10 +18,10 @@ interface Props {
  * - neither      → renders nothing
  */
 export default function NodeLocationBadge({ nodeId }: Props) {
-  const config      = useArchitectureStore((s) => s.nodeConfigs[nodeId] ?? {});
   const nodeConfigs = useArchitectureStore((s) => s.nodeConfigs);
+  const config = nodeConfigs[nodeId];
 
-  if (config.zoneId) {
+  if (config?.zoneId) {
     const zoneCfg  = nodeConfigs[config.zoneId];
     const zoneName = zoneCfg?.zoneName ?? zoneCfg?.label ?? 'AZ';
     return (
@@ -53,7 +53,7 @@ export default function NodeLocationBadge({ nodeId }: Props) {
     );
   }
 
-  if (config.regionId) {
+  if (config?.regionId) {
     const regionCfg  = nodeConfigs[config.regionId];
     const regionName = regionCfg?.regionName ?? regionCfg?.label ?? 'Region';
     return (

@@ -32,6 +32,7 @@ export interface ArchitectureEntry {
   id: string;
   name: string;
   description: string;
+  category: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   tags: string[];
   template: ArchitectureTemplate;
@@ -160,7 +161,20 @@ function buildEventDriven(): ArchitectureTemplate {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Microservices
+// 5. IaC Starter Example
+// ---------------------------------------------------------------------------
+
+function buildIacStarterExample(): ArchitectureTemplate {
+  return {
+    nodes: [],
+    edges: [],
+    nodeConfigs: {},
+    edgeConfigs: {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 6. Microservices
 // ---------------------------------------------------------------------------
 
 function buildMicroservices(): ArchitectureTemplate {
@@ -1176,14 +1190,25 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'three-tier',
     name: 'Three-Tier Web App',
     description: 'Classic presentation, logic, and data layers. The foundation of most web applications.',
+    category: 'Core Architectures',
     difficulty: 'beginner',
     tags: ['App Server', 'Database', 'Web'],
     template: buildThreeTier(),
   },
   {
+    id: 'iac-yaml-starter',
+    name: 'IaC Starter - YAML Three-Tier Import',
+    description: 'Starts with a blank canvas and the YAML starter in the IaC drawer. Nodes appear only after you validate and apply the YAML.',
+    category: 'IaC Examples',
+    difficulty: 'beginner',
+    tags: ['IaC', 'YAML', 'Terraform-like', 'Import'],
+    template: buildIacStarterExample(),
+  },
+  {
     id: 'cached-web-app',
     name: 'Load-Balanced App + Cache',
     description: 'Add a load balancer and Redis cache to reduce database pressure on read-heavy traffic.',
+    category: 'Core Architectures',
     difficulty: 'beginner',
     tags: ['Load Balancer', 'Cache', 'Database'],
     template: buildCachedWebApp(),
@@ -1192,6 +1217,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'cdn-web-app',
     name: 'CDN-Accelerated Web App',
     description: 'Push static assets to edge POPs worldwide. Dramatically reduces origin load and latency.',
+    category: 'Core Architectures',
     difficulty: 'intermediate',
     tags: ['CDN', 'Load Balancer', 'Database'],
     template: buildCdnWebApp(),
@@ -1200,6 +1226,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'event-driven',
     name: 'Event-Driven Pipeline',
     description: 'Decouple producers from consumers via a message bus. Great for async workloads and fan-out.',
+    category: 'Core Architectures',
     difficulty: 'intermediate',
     tags: ['Pub/Sub', 'Worker Pool', 'Async'],
     template: buildEventDriven(),
@@ -1208,6 +1235,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'microservices',
     name: 'Microservices Architecture',
     description: 'Split the domain into independent services with isolated databases. Each service owns its data.',
+    category: 'Core Architectures',
     difficulty: 'intermediate',
     tags: ['Load Balancer', 'Microservices', 'Multiple DBs'],
     template: buildMicroservices(),
@@ -1216,6 +1244,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'serverless',
     name: 'Serverless API',
     description: 'Zero-server compute — functions scale to zero and spin up on demand. Low ops overhead.',
+    category: 'Core Architectures',
     difficulty: 'beginner',
     tags: ['Cloud Functions', 'Database', 'Serverless'],
     template: buildServerless(),
@@ -1224,6 +1253,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'high-availability',
     name: 'High-Availability Platform',
     description: 'CDN + autoscaling app servers + clustered cache + sharded replicated DB. Production-grade.',
+    category: 'Resilience & Scale',
     difficulty: 'advanced',
     tags: ['CDN', 'Autoscaling', 'Cache', 'Sharding'],
     template: buildHighAvailability(),
@@ -1232,6 +1262,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'read-heavy',
     name: 'Read-Heavy API + Rate Limiting',
     description: 'Protect the origin with a rate limiter and serve 85%+ reads from cache with replica fan-out.',
+    category: 'Resilience & Scale',
     difficulty: 'advanced',
     tags: ['Rate Limiter', 'Cache', 'Read Replicas'],
     template: buildReadHeavy(),
@@ -1240,6 +1271,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'service-mesh',
     name: 'Microservices + Service Mesh',
     description: 'Four services behind an Istio-style mesh with mTLS, retries, and circuit breaking. Spike traffic overloads the Payment Service — watch the circuit breaker open and propagate errors back through the mesh.',
+    category: 'Resilience & Scale',
     difficulty: 'advanced',
     tags: ['Service Mesh', 'Circuit Breaker', 'Microservices', 'mTLS'],
     template: buildServiceMesh(),
@@ -1248,6 +1280,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'multi-az-ha',
     name: 'Multi-AZ High Availability',
     description: 'Global Accelerator routes 50/50 across two AZs in us-east-1. Each AZ has 4 app-server instances (2 400 rps capacity) so the survivor can absorb full traffic at ~83 % load. Toggle "Simulate Zone Failure" on AZ-a to watch the accelerator reroute in real time.',
+    category: 'Resilience & Scale',
     difficulty: 'intermediate',
     tags: ['Global Accelerator', 'Availability Zone', 'Region', 'HA', 'Zone Failure', 'Failover'],
     template: buildMultiAzHA(),
@@ -1256,6 +1289,7 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     id: 'multi-region-active-active',
     name: 'Multi-Region Active-Active',
     description: 'CDN → Global Accelerator fans traffic 50/50 across us-east-1 and us-west-2. Each region has a public subnet (ALB → Firewall → API GW + NAT Gateway) and private subnets per AZ (Users + Orders services). App servers default to target-tracking autoscaling in this setup. PostgreSQL runs with a single primary in us-east-1a and read replicas in the other three AZs. Firewall provides stateful L4 inspection inline; NAT Gateway anchors outbound VPC traffic. Toggle "Simulate Region Failure" to watch GA shift all traffic to the survivor, or raise the Firewall block rate to simulate a WAF blocking attack traffic.',
+    category: 'Resilience & Scale',
     difficulty: 'advanced',
     tags: ['Global Accelerator', 'Region', 'Availability Zone', 'CDN', 'API Gateway', 'Firewall', 'NAT Gateway', 'Subnet', 'Microservices', 'Cross-Region', 'Read Replicas', 'Failover'],
     template: buildMultiRegion(),

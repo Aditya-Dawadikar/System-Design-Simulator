@@ -25,6 +25,8 @@ interface ArchitectureStore {
   setSelectedNode: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
   loadTemplate: (template: ArchitectureTemplate, scenarioId?: string) => void;
+  /** Apply a topology from the IaC pipeline without touching activeScenarioId. */
+  loadTopology: (template: ArchitectureTemplate) => void;
   exportToJSON: () => string;
   importFromJSON: (json: string) => void;
 }
@@ -128,6 +130,17 @@ export const useArchitectureStore = create<ArchitectureStore>()(
           selectedNodeId: null,
           selectedEdgeId: null,
           activeScenarioId: scenarioId,
+        });
+      },
+
+      loadTopology: (template) => {
+        set({
+          nodes: template.nodes,
+          edges: template.edges,
+          nodeConfigs: template.nodeConfigs,
+          edgeConfigs: template.edgeConfigs,
+          selectedNodeId: null,
+          selectedEdgeId: null,
         });
       },
 

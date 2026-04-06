@@ -9,9 +9,11 @@ import ComponentLibrary from '@/components/sidebar/ComponentLibrary';
 import Inspector from '@/components/inspector/Inspector';
 import MetricsDashboard from '@/components/simulation/MetricsDashboard';
 import ScenarioDocsDrawer from '@/components/simulation/ScenarioDocsDrawer';
+import IacEditorDrawer from '@/components/iac/IacEditorDrawer';
 import { useSimulationStore } from '@/store/simulationStore';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { SCENARIO_LIBRARY } from '@/templates/scenarios';
+import { THREE_TIER_STARTER } from '@/iac/starters';
 
 export default function SimulatorPage() {
   const { theme, toggleTheme } = useTheme();
@@ -23,6 +25,10 @@ export default function SimulatorPage() {
   const activeScenarioId = useArchitectureStore((s) => s.activeScenarioId);
   const activeScenario   = SCENARIO_LIBRARY.find((s) => s.id === activeScenarioId) ?? null;
   const [docsOpen, setDocsOpen] = useState(false);
+
+  // IaC editor state — lifted so the YAML text survives open/close cycles
+  const [iacOpen, setIacOpen]   = useState(false);
+  const [iacYaml, setIacYaml]   = useState(THREE_TIER_STARTER);
 
   return (
     <ReactFlowProvider>
@@ -59,6 +65,39 @@ export default function SimulatorPage() {
           <span style={{ color: 'var(--accent-cyan)', fontWeight: 600, fontSize: 13, letterSpacing: 2 }}>SIMULATOR</span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* IaC Editor */}
+            <button
+              onClick={() => setIacOpen(true)}
+              title="Open Infrastructure-as-Code YAML editor"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 12px',
+                border: '1px solid var(--accent-purple)',
+                borderRadius: 4,
+                background: 'transparent',
+                color: 'var(--accent-purple)',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                letterSpacing: '0.05em',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-purple)';
+                (e.currentTarget as HTMLButtonElement).style.color = 'var(--bg-base)';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-purple)';
+              }}
+            >
+              <span style={{ fontSize: 11 }}>⌥</span>
+              IAC
+            </button>
+
             {/* Scenario Docs */}
             {activeScenario && (
               <button
@@ -187,6 +226,15 @@ export default function SimulatorPage() {
           scenarioName={activeScenario.name}
           docs={activeScenario.docs}
           onClose={() => setDocsOpen(false)}
+        />
+      )}
+
+      {/* IaC YAML editor drawer */}
+      {iacOpen && (
+        <IacEditorDrawer
+          yamlText={iacYaml}
+          onYamlChange={setIacYaml}
+          onClose={() => setIacOpen(false)}
         />
       )}
     </ReactFlowProvider>

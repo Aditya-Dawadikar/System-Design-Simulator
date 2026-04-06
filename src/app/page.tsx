@@ -14,6 +14,18 @@ const DIFFICULTY_COLOR: Record<string, string> = {
   advanced:     'var(--accent-red)',
 };
 
+const ARCHITECTURE_CATEGORY_ORDER = [
+  'Core Architectures',
+  'IaC Examples',
+  'Resilience & Scale',
+] as const;
+
+const ARCHITECTURE_CATEGORY_COLOR: Record<string, string> = {
+  'Core Architectures': 'var(--accent-purple)',
+  'IaC Examples': 'var(--accent-cyan)',
+  'Resilience & Scale': 'var(--accent-orange)',
+};
+
 function normalizeSearchValue(value: string) {
   return value.trim().toLowerCase();
 }
@@ -61,19 +73,23 @@ export default function Dashboard() {
   const ARCH_PAGE_SIZE = 3;
   const SCENARIO_PAGE_SIZE = 3;
   const [searchQuery, setSearchQuery] = useState('');
-  const [archVisible, setArchVisible] = useState(ARCH_PAGE_SIZE);
+  const [archVisibleByCategory, setArchVisibleByCategory] = useState<Record<string, number>>(() =>
+    Object.fromEntries(ARCHITECTURE_CATEGORY_ORDER.map((category) => [category, ARCH_PAGE_SIZE]))
+  );
   const [scenarioVisible, setScenarioVisible] = useState(SCENARIO_PAGE_SIZE);
 
   const searchTerm = normalizeSearchValue(searchQuery);
 
   function handleSearchChange(value: string) {
     setSearchQuery(value);
-    setArchVisible(ARCH_PAGE_SIZE);
+    setArchVisibleByCategory(
+      Object.fromEntries(ARCHITECTURE_CATEGORY_ORDER.map((category) => [category, ARCH_PAGE_SIZE]))
+    );
     setScenarioVisible(SCENARIO_PAGE_SIZE);
   }
 
   const filteredArchitectures = ARCHITECTURE_LIBRARY.filter((entry) =>
-    matchesSearch(searchTerm, [entry.name, entry.description, entry.difficulty, ...entry.tags])
+    matchesSearch(searchTerm, [entry.name, entry.description, entry.category, entry.difficulty, ...entry.tags])
   );
 
   const filteredScenarios = SCENARIO_LIBRARY.filter((entry) =>
@@ -89,7 +105,21 @@ export default function Dashboard() {
     ])
   );
 
-  const visibleArchitectures = filteredArchitectures.slice(0, archVisible);
+  const groupedArchitectures = Array.from(
+    filteredArchitectures.reduce((groups, entry) => {
+      const category = entry.category || 'Architecture Library';
+      const items = groups.get(category) ?? [];
+      items.push(entry);
+      groups.set(category, items);
+      return groups;
+    }, new Map<string, ArchitectureEntry[]>()).entries()
+  ).sort(([a], [b]) => {
+    const aIndex = ARCHITECTURE_CATEGORY_ORDER.indexOf(a as (typeof ARCHITECTURE_CATEGORY_ORDER)[number]);
+    const bIndex = ARCHITECTURE_CATEGORY_ORDER.indexOf(b as (typeof ARCHITECTURE_CATEGORY_ORDER)[number]);
+    const aRank = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+    const bRank = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+    return aRank - bRank;
+  });
   const visibleScenarios = filteredScenarios.slice(0, scenarioVisible);
   const hasSearchResults = filteredArchitectures.length > 0 || filteredScenarios.length > 0;
 
@@ -263,50 +293,93 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 16,
-          }}>
-            {visibleArchitectures.map((entry) => (
-              <ArchitectureCard
-                key={entry.id}
-                entry={entry}
-                onLoad={() => openArchitecture(entry)}
-              />
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            {groupedArchitectures.map(([category, entries]) => {
+              const categoryColor = ARCHITECTURE_CATEGORY_COLOR[category] ?? 'var(--accent-cyan)';
+              const visibleCount = archVisibleByCategory[category] ?? ARCH_PAGE_SIZE;
+              const visibleEntries = entries.slice(0, visibleCount);
+              const remaining = entries.length - visibleEntries.length;
+
+              return (
+                <div
+                  key={category}
+                  style={{
+                    padding: '14px 14px 16px',
+                    border: `1px solid ${categoryColor}22`,
+                    borderRadius: 10,
+                    background: 'var(--bg-panel)',
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginBottom: 14,
+                  }}>
+                    <span style={{
+                      color: categoryColor,
+                      fontSize: 10,
+                      letterSpacing: 1.4,
+                      textTransform: 'uppercase',
+                      fontWeight: 700,
+                    }}>
+                      {category}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: `${categoryColor}33` }} />
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                    gap: 16,
+                  }}>
+                    {visibleEntries.map((entry) => (
+                      <ArchitectureCard
+                        key={entry.id}
+                        entry={entry}
+                        onLoad={() => openArchitecture(entry)}
+                      />
+                    ))}
+                  </div>
+
+                  {remaining > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                      <button
+                        onClick={() =>
+                          setArchVisibleByCategory((current) => ({
+                            ...current,
+                            [category]: (current[category] ?? ARCH_PAGE_SIZE) + ARCH_PAGE_SIZE,
+                          }))
+                        }
+                        style={{
+                          padding: '7px 24px',
+                          border: `1px solid ${categoryColor}`,
+                          borderRadius: 4,
+                          background: 'transparent',
+                          color: categoryColor,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 11,
+                          cursor: 'pointer',
+                          letterSpacing: '0.05em',
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.opacity = '0.85';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.opacity = '1';
+                        }}
+                      >
+                        Load more ({remaining} remaining)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
           {filteredArchitectures.length === 0 && searchTerm && (
             <EmptyLibraryState label="architectures" accentColor="var(--accent-purple)" />
-          )}
-          {archVisible < filteredArchitectures.length && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20 }}>
-              <button
-                onClick={() => setArchVisible((v) => Math.min(v + ARCH_PAGE_SIZE, filteredArchitectures.length))}
-                style={{
-                  padding: '7px 24px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 4,
-                  background: 'transparent',
-                  color: 'var(--text-dim)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  letterSpacing: '0.05em',
-                  transition: 'border-color 0.15s, color 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-purple)';
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-purple)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-dim)';
-                }}
-              >
-                Load more ({filteredArchitectures.length - archVisible} remaining)
-              </button>
-            </div>
           )}
         </div>
 
@@ -474,6 +547,7 @@ interface ScenarioCardProps {
 
 function ArchitectureCard({ entry, onLoad }: ArchitectureCardProps) {
   const diffColor = DIFFICULTY_COLOR[entry.difficulty] ?? 'var(--text-dim)';
+  const categoryColor = ARCHITECTURE_CATEGORY_COLOR[entry.category] ?? 'var(--accent-cyan)';
   const nodeCount = entry.template.nodes.length;
   const edgeCount = entry.template.edges.length;
 
@@ -494,19 +568,34 @@ function ArchitectureCard({ entry, onLoad }: ArchitectureCardProps) {
       {/* Top row */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{entry.name}</div>
-        <span style={{
-          fontSize: 9,
-          fontWeight: 700,
-          color: diffColor,
-          border: `1px solid ${diffColor}44`,
-          borderRadius: 3,
-          padding: '1px 6px',
-          whiteSpace: 'nowrap',
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-        }}>
-          {entry.difficulty}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <span style={{
+            fontSize: 8,
+            fontWeight: 700,
+            color: categoryColor,
+            border: `1px solid ${categoryColor}44`,
+            borderRadius: 3,
+            padding: '1px 6px',
+            whiteSpace: 'nowrap',
+            letterSpacing: 1,
+            textTransform: 'uppercase',
+          }}>
+            {entry.category}
+          </span>
+          <span style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: diffColor,
+            border: `1px solid ${diffColor}44`,
+            borderRadius: 3,
+            padding: '1px 6px',
+            whiteSpace: 'nowrap',
+            letterSpacing: 1,
+            textTransform: 'uppercase',
+          }}>
+            {entry.difficulty}
+          </span>
+        </div>
       </div>
 
       {/* Description */}
