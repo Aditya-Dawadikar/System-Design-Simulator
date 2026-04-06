@@ -13,23 +13,29 @@ Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulato
 
 ### P0 - Foundation (do first)
 
-- [ ] Define the YAML DSL contract and canonical example files for single-region and multi-region topologies.
-- [ ] Create the `src/iac/` foundation: `schema.ts`, `parser.ts`, `validate.ts`, `normalize.ts`, `toTopology.ts`, and `fromTopology.ts`.
-- [ ] Add YAML parsing with actionable error reporting, including line/path context where possible.
-- [ ] Add schema and semantic validation for duplicate IDs, unknown resource types, invalid placements, and broken connections.
-- [ ] Convert validated YAML into simulator `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`.
-- [ ] Add a safe `Apply YAML` flow that only updates the stores and canvas when validation passes.
+- [x] Define the YAML DSL contract and canonical example files for single-region and multi-region topologies.
+- [x] Create the `src/iac/` foundation: `schema.ts`, `parser.ts`, `validate.ts`, `normalize.ts`, `toTopology.ts`, and `fromTopology.ts`.
+- [x] Add YAML parsing with actionable error reporting, including line/path context where possible.
+- [x] Add schema and semantic validation for duplicate IDs, unknown resource types, invalid placements, and broken connections.
+- [x] Convert validated YAML into simulator `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`.
+- [x] Add a safe `Apply YAML` flow that only updates the stores and canvas when validation passes.
+- [ ] Auto-generate simulator IaC whenever a topology is created or edited through drag-and-drop on the canvas.
+- [ ] Add IaC coverage for all existing architecture templates and shipped starter architectures.
+- [ ] Ensure a brand-new screen starts with both the canvas and the IaC editor empty.
+- [ ] Keep the canvas and IaC in full two-way sync at all times, regardless of whether edits start in the editor or on the canvas.
+- [ ] Make auto-generated IaC capture the complete node state, including default-valued and previously untouched fields.
+- [ ] Scope IaC state per architecture so opening a different architecture/file only shows its own corresponding IaC.
 
 ### P1 - Authoring Experience
 
-- [ ] Build a YAML editor panel/drawer with starter template, `Validate`, `Apply`, and `Reset` actions.
-- [ ] Auto-layout imported topologies so the first render is readable and usable.
-- [ ] Export the current canvas back to YAML with stable IDs and consistent field ordering.
-- [ ] Add example templates for `three-tier`, `multi-az`, and `event-driven` architectures.
+- [x] Build a YAML editor panel/drawer with starter template, `Validate`, `Apply`, and `Reset` actions.
+- [x] Auto-layout imported topologies so the first render is readable and usable.
+- [x] Export the current canvas back to YAML with stable IDs and consistent field ordering.
+- [x] Add example templates for `three-tier`, `multi-az`, and `event-driven` architectures.
 
 ### P2 - Quality and Polish
 
-- [ ] Add round-trip tests for import/export stability and config mapping correctness.
+- [x] Add round-trip tests for import/export stability and config mapping correctness.
 - [ ] Add friendly warnings for unsupported combinations and partial-fidelity exports.
 - [ ] Add schema hints/autocomplete and an optional format action for the YAML editor.
 - [ ] Document the YAML DSL and workflow in `README.md` with example usage.
@@ -91,8 +97,8 @@ These are remaining pending items from the earlier simulator milestone. They sta
 ### Carry-over simulator work
 
 - [ ] Build a resource "Controller" UI for bulk multi-region/multi-zone management (Terraform-style UX): define a service by type once (for example, "Orders"), choose region and AZ span, and configure shared min/max node or resource counts that fan out to all generated instances. Phase 1 scope: manage app servers, storage types, and compute nodes; add other managers later.
-- [ ] Expand automated `SimulationEngine` coverage for overload, failover, routing, and stateful component behavior.
-- [ ] Refresh `COMPONENTS.md` so it documents all shipped nodes, including Firewall, NAT Gateway, Public Subnet, Private Subnet, Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
+- [x] Expand automated `SimulationEngine` coverage for overload, failover, routing, and stateful component behavior.
+- [x] Refresh `COMPONENTS.md` so it documents all shipped nodes, including Firewall, NAT Gateway, Public Subnet, Private Subnet, Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
 
 ### Future component backlog
 
