@@ -16,6 +16,8 @@ Project-specific instructions for Claude Code. Read this before making any chang
 | lucide-react | ^1.0.1 |
 | Tailwind CSS | ^4.2.2 |
 | TypeScript | ^5.9.3 |
+| zod | ^4.3.6 |
+| js-yaml | ^4.1.1 |
 
 **No Vite** — this is a Next.js project. Dev server: `npm run dev`.
 
@@ -81,6 +83,7 @@ src/
 │   ├── normalize.ts                # Fill defaults, resolve derived values, stable IDs
 │   ├── toTopology.ts               # Validated YAML model → nodes/edges/nodeConfigs/edgeConfigs
 │   ├── fromTopology.ts             # Current canvas state → YAML model (export)
+│   ├── starters.ts                 # Embedded YAML template strings (THREE_TIER_STARTER, etc.)
 │   └── examples/
 │       ├── three-tier.yaml         # Classic CDN → LB → App → DB
 │       ├── multi-az.yaml           # Multi-AZ with zone failover

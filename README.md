@@ -23,6 +23,7 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 - **Metrics dashboard** — global stats, per-node ArcGauge load indicators, RPS sparklines, P99 latency, error rate, component detail rows, and a live latency percentile chart (p50/p75/p90/p95/p99) per selected node
 - **Event log** — timestamped info / warn / error / k8s events with auto-scroll
 - **Drag-and-drop canvas** — React Flow canvas with zoom, pan, duplicate, and delete; architecture persisted to localStorage
+- **IaC YAML editor** — declare entire topologies in a single YAML file; Validate/Apply/Export actions; structured parse and semantic error surfacing; starter template; round-trip stable export from any canvas state
 - **JSON import/export** — save and share architecture snapshots
 - **Architecture templates** — 11 pre-built scenarios including multi-AZ high availability, multi-region active-active with per-microservice traffic routing, and more
 
@@ -77,6 +78,7 @@ Test file convention: one test file per feature under `tests/features/`.
 7. **Run the simulation** using the controls at the bottom. Choose a peak RPS and a traffic pattern, then click Run.
 8. **Read metrics** in the dashboard below the canvas — global stats update every 500 ms; per-node cards show load, RPS, latency, and component-specific details.
 9. **Watch the event log** for overload events, recovery, autoscaling actions, health-check rerouting, and queue warnings.
+10. **Use the IaC YAML editor** — click the **IAC** button in the header to open the editor. Write or paste a topology YAML, click **VALIDATE** to see parse and semantic errors, then **APPLY** to replace the canvas atomically. **EXPORT** writes the current canvas back to YAML. **STARTER** resets the editor to the built-in three-tier template.
 
 ---
 
@@ -151,3 +153,5 @@ Traffic generators have their own independent pattern setting. The global patter
 | Recharts 3 | Sparklines and time-series charts |
 | TypeScript 5 | Type safety across engine and UI |
 | Tailwind CSS 4 | Styling with dark terminal theme |
+| Zod 4 | IaC YAML schema validation |
+| js-yaml 4 | YAML parsing and serialization |
