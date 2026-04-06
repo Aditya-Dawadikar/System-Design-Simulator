@@ -74,6 +74,17 @@ src/
 ├── store/
 │   ├── architectureStore.ts        # Zustand — canvas state, persisted to localStorage
 │   └── simulationStore.ts          # Zustand — ephemeral simulation state + tick loop
+├── iac/
+│   ├── schema.ts                   # TypeScript types + Zod schema for the YAML DSL
+│   ├── parser.ts                   # YAML text → parsed JS object with error handling
+│   ├── validate.ts                 # Semantic validation (duplicate IDs, bad refs, placement)
+│   ├── normalize.ts                # Fill defaults, resolve derived values, stable IDs
+│   ├── toTopology.ts               # Validated YAML model → nodes/edges/nodeConfigs/edgeConfigs
+│   ├── fromTopology.ts             # Current canvas state → YAML model (export)
+│   └── examples/
+│       ├── three-tier.yaml         # Classic CDN → LB → App → DB
+│       ├── multi-az.yaml           # Multi-AZ with zone failover
+│       └── event-driven.yaml       # Queue-heavy async architecture
 ├── templates/
 │   ├── defaultTemplate.ts          # Pre-built starter architecture
 │   ├── architectures.ts            # Architecture library
@@ -735,3 +746,197 @@ Rendered at the bottom of every resource node card. Shows zone (cyan) or region 
 - **Database `dbRole` defaults to `'standalone'`** — existing architectures without `dbRole` set continue to work. The `readReplicas` virtual-count field is only meaningful for `standalone`.
 - **Replica `primaryNodeId` required for write routing** — a `replica` without `primaryNodeId` rejects all writes immediately.
 - **Global error rate** — uses source-denominator formula, not a plain weighted average. Adding a new source-type node requires updating `SOURCE_TYPES` in `MetricsDashboard.tsx`.
+
+---
+
+## Phase 2 — IaC YAML Authoring (`src/iac/`)
+
+### Overview
+
+Phase 2 adds a Terraform-inspired YAML DSL so users can define an entire topology in one file and have the simulator build and configure the canvas automatically. This is **not** real cloud provisioning — it is a simulator-native IaC playground.
+
+Core workflow:
+1. User opens the YAML editor panel
+2. User writes or pastes a simulator YAML document
+3. App validates the document and shows structured errors
+4. `Apply` replaces the canvas atomically (only on success)
+5. The simulation runs immediately against the imported topology
+6. `Export` writes the current canvas back to clean, diff-friendly YAML
+
+### YAML DSL shape (v1)
+
+```yaml
+version: 1
+name: checkout-platform
+description: Multi-AZ API with cache and database
+
+globals:
+  peakRps: 4500
+  trafficPattern: ramp          # steady | ramp | spike | wave | chaos
+
+regions:
+  - id: us-east-1
+    label: us-east-1
+    zones:
+      - id: use1a
+        label: us-east-1a
+      - id: use1b
+        label: us-east-1b
+
+resources:
+  - id: edge
+    type: cdn
+    label: Global CDN
+    placement:
+      scope: global             # global | region | zone
+    spec:
+      pops: 4
+      cacheablePct: 70
+
+  - id: api-lb
+    type: load_balancer
+    label: Public API LB
+    placement:
+      region: us-east-1         # maps to nodeConfig.regionId
+    spec:
+      algorithm: least_conn
+
+  - id: api-a
+    type: app_server
+    label: API Server A
+    placement:
+      zone: use1a               # maps to nodeConfig.zoneId
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 10
+        targetMetric: load
+        targetValue: 70
+
+connections:
+  - from: edge
+    to: api-lb
+    protocol: REST
+    timeoutMs: 3000
+  - from: api-lb
+    to: api-a
+    splitPct: 50
+
+scenarios:
+  - type: fail_zone
+    target: use1a
+    enabled: false
+```
+
+### YAML → simulator mapping
+
+| YAML concept | Maps to |
+|---|---|
+| `resources[]` | React Flow `nodes[]` |
+| `connections[]` | React Flow `edges[]` |
+| `regions[].id` | node ID for the `region` node; also used for `regionId` lookups |
+| `regions[].zones[].id` | node ID for the `availability_zone` node; used for `zoneId` lookups |
+| `placement.scope: global` | no placement field set |
+| `placement.region` | `nodeConfig.regionId` |
+| `placement.zone` | `nodeConfig.zoneId` |
+| `spec.*` | flat `nodeConfigs[nodeId]` fields |
+| `deploy.*` | flat `nodeConfigs[nodeId]` fields (`instances`, `cpuCores`, etc.) |
+| `deploy.autoscaling.*` | `autoscalingEnabled`, `autoscalingStrategy`, `minInstances`, … |
+| `connections[].protocol` | `edgeConfigs[edgeId].protocol` |
+| `connections[].timeoutMs` | `edgeConfigs[edgeId].timeoutMs` |
+| `connections[].splitPct` | `edgeConfigs[edgeId].splitPct` |
+| `globals.peakRps` | simulation control default RPS |
+| `globals.trafficPattern` | simulation pattern default |
+
+### Compiler pipeline (`src/iac/`)
+
+```
+YAML text
+  → parser.ts        parse YAML, surface line/path on syntax errors
+  → validate.ts      semantic checks (see rules below)
+  → normalize.ts     fill defaults, generate stable node IDs
+  → toTopology.ts    produce { nodes, edges, nodeConfigs, edgeConfigs }
+  → store apply      architectureStore.setTopology() — atomic, only on success
+  → canvas render    React Flow picks up the new nodes/edges
+```
+
+Export path: `fromTopology.ts` reads current store state → produces clean YAML model → serialized to string.
+
+All pipeline modules are **pure functions** — no React imports, no store imports. Testable in isolation.
+
+### Validation rules (minimum for v1)
+
+Errors block apply. Warnings are advisory.
+
+| Rule | Severity |
+|---|---|
+| Missing `version` field | error |
+| Duplicate resource `id` | error |
+| Unknown `type` (not in `ComponentType`) | error |
+| `connections[].from` / `.to` references non-existent resource ID | error |
+| `placement.zone` references a zone ID not declared in `regions` | error |
+| `placement.region` references a region ID not declared in `regions` | error |
+| Regional resource missing `placement.region` | error |
+| Zonal resource missing `placement.zone` | error |
+| Global resource with `placement.zone` or `placement.region` | error |
+| Invalid enum value (e.g. `algorithm`, `engine`, `trafficPattern`) | error |
+| Unsupported field for given resource type | warning |
+| Self-referencing connection (`from === to`) | error |
+
+Validation result shape:
+```ts
+interface ValidationIssue {
+  severity: 'error' | 'warning'
+  message: string
+  path?: string      // e.g. "resources[2].placement.zone"
+  line?: number
+}
+```
+
+### UI requirements
+
+- YAML editor in a drawer/panel (not a modal — needs to stay open alongside the canvas)
+- Toolbar: `Starter Template` | `Validate` | `Apply` | `Export` | `Reset`
+- Error list rendered below the editor; clicking an error highlights the relevant line
+- `Apply` is disabled while there are validation errors
+- `Apply` replaces the canvas atomically — partial mutation on invalid input is not allowed
+- Auto-layout nodes after import (dagre or simple grid) so the first render is immediately readable
+
+### Node auto-layout after import
+
+After `toTopology` produces nodes, apply a deterministic layout before writing to the store:
+- Region and AZ containers positioned first
+- Child nodes distributed inside their container
+- Nodes without placement stacked at the top in a grid
+- Do not overwrite positions on subsequent exports/re-imports if IDs are stable
+
+### Export behavior
+
+- `fromTopology.ts` must produce stable YAML when re-exported after a round-trip
+- Use the same `id` as the React Flow node ID where possible
+- Omit fields that are equal to their defaults (keeps YAML clean)
+- Field ordering: `id`, `type`, `label`, `placement`, `spec`/`deploy` (consistent per-resource)
+- Connection ordering follows topological sort (sources first)
+
+### Supported resource types for v1 YAML
+
+`traffic_generator`, `cdn`, `global_accelerator`, `load_balancer`, `api_gateway`, `app_server`, `cache`, `database`, `pubsub`, `cloud_function`, `worker_pool`, `cloud_storage`, `rate_limiter`, `service_mesh`, `nat_gateway`, `firewall`, `region`, `availability_zone`
+
+Prefer enabling existing simulator types in YAML rather than inventing parallel models.
+
+### IaC-specific gotchas
+
+- **Atomic apply only** — never partially mutate store state. Build the full topology object first, validate it, then call `setTopology` once.
+- **`regions` section auto-creates nodes** — declaring a region or zone in `regions[]` implicitly creates a `region` / `availability_zone` node. Do not also declare them again in `resources[]`.
+- **Placement ID resolution** — `placement.zone: use1a` maps to the node whose ID is `use1a`. The validator must confirm the zone exists in `regions`.
+- **`deploy` vs `spec`** — `deploy` is used for compute resources (`app_server`, `worker_pool`, `cloud_function`); `spec` for everything else. Both flatten into the same `NodeConfig` shape.
+- **Autoscaling sub-object** — `deploy.autoscaling.*` must be spread into flat `NodeConfig` fields (`autoscalingEnabled`, `autoscalingStrategy`, `minInstances`, etc.) in `toTopology.ts`.
+- **Export omits defaults** — `fromTopology.ts` should not emit fields whose value equals the `ComponentDefinition` default. Keeps exported YAML minimal and diff-friendly.
+- **Parser is decoupled from React** — `src/iac/` modules must not import from `src/components/`, `src/store/`, or `src/simulation/`. They accept plain data and return plain data.
+- **Round-trip stability** — importing a YAML file, exporting it, and re-importing must produce an identical topology. Test this explicitly.

@@ -1,10 +1,41 @@
 ﻿# TODO - System Design Simulator
 
-Last refreshed: March 31, 2026
+Last refreshed: April 5, 2026
 
-This file reflects the current codebase state. It replaces the older component list, which was stale and included duplicate or already-shipped items.
+This file reflects the current codebase state and active delivery plan.
+**Current priority is Phase 2: Terraform-like YAML infrastructure authoring.**
+Any unfinished simulator work from the earlier milestone is now tracked under the Phase 1 backlog.
 
-## Shipped Now
+
+## Phase 2 Priority Todo List
+
+Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulator.
+
+### P0 - Foundation (do first)
+
+- [ ] Define the YAML DSL contract and canonical example files for single-region and multi-region topologies.
+- [ ] Create the `src/iac/` foundation: `schema.ts`, `parser.ts`, `validate.ts`, `normalize.ts`, `toTopology.ts`, and `fromTopology.ts`.
+- [ ] Add YAML parsing with actionable error reporting, including line/path context where possible.
+- [ ] Add schema and semantic validation for duplicate IDs, unknown resource types, invalid placements, and broken connections.
+- [ ] Convert validated YAML into simulator `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`.
+- [ ] Add a safe `Apply YAML` flow that only updates the stores and canvas when validation passes.
+
+### P1 - Authoring Experience
+
+- [ ] Build a YAML editor panel/drawer with starter template, `Validate`, `Apply`, and `Reset` actions.
+- [ ] Auto-layout imported topologies so the first render is readable and usable.
+- [ ] Export the current canvas back to YAML with stable IDs and consistent field ordering.
+- [ ] Add example templates for `three-tier`, `multi-az`, and `event-driven` architectures.
+
+### P2 - Quality and Polish
+
+- [ ] Add round-trip tests for import/export stability and config mapping correctness.
+- [ ] Add friendly warnings for unsupported combinations and partial-fidelity exports.
+- [ ] Add schema hints/autocomplete and an optional format action for the YAML editor.
+- [ ] Document the YAML DSL and workflow in `README.md` with example usage.
+
+
+## Phase 1: Shipped Now
 
 ### Infrastructure and topology
 
@@ -53,19 +84,17 @@ This file reflects the current codebase state. It replaces the older component l
 - [x] JSON import and export
 - [x] Architecture templates and scenarios
 
-## High Priority Next Work
+## Phase 1: Backlog
 
-- [x] Define autoscaling strategy modes and behavior contracts: Target Tracking, Scheduled, and Predictive (inputs, trigger logic, cooldown interaction, and UI controls).
-- [x] Make target-tracking autoscaling transitions non-instantaneous: model realistic scale-up and scale-down propagation delays so capacity and load changes take effect over time, not in the same tick.
-- [x] Add a live tail-latency chart for the overall system (p95 and p99) with real-time updates during simulation runs.
-- [x] Update the error-rate chart so it refreshes every tick in lockstep with the traffic line chart.
+These are remaining pending items from the earlier simulator milestone. They stay important, but are no longer the active top priority.
+
+### Carry-over simulator work
+
 - [ ] Build a resource "Controller" UI for bulk multi-region/multi-zone management (Terraform-style UX): define a service by type once (for example, "Orders"), choose region and AZ span, and configure shared min/max node or resource counts that fan out to all generated instances. Phase 1 scope: manage app servers, storage types, and compute nodes; add other managers later.
-- [x] Enforce app server active-standby warm-capacity invariants: always maintain configured warm node count, and guarantee `activeInstances + warmReserve <= maxInstances` during scale-up, scale-down, and warm-pool refill.
-- [x] Enforce primary-only write routing for databases: all write traffic must route to the configured Primary DB (regardless of its zone), and in multi-region topologies all writes must always go to that primary while replicas remain read-only targets.
-- [ ] Expand automated SimulationEngine coverage for overload, failover, routing, and stateful component behavior.
-- [ ] Refresh COMPONENTS.md so it documents all shipped nodes, including Firewall, NAT Gateway, Public Subnet, Private Subnet, Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
+- [ ] Expand automated `SimulationEngine` coverage for overload, failover, routing, and stateful component behavior.
+- [ ] Refresh `COMPONENTS.md` so it documents all shipped nodes, including Firewall, NAT Gateway, Public Subnet, Private Subnet, Rate Limiter, Service Mesh, Global Accelerator, Region, Availability Zone, Block Storage, and Network Storage.
 
-## Medium Priority Backlog
+### Future component backlog
 
 - [ ] Add Stream Processing with backpressure and checkpointing behavior.
 - [ ] Add Search Engine / Index node with indexing vs query tradeoffs.
@@ -74,8 +103,8 @@ This file reflects the current codebase state. It replaces the older component l
 - [ ] Add Monitoring / Alerting node for observability pipeline behavior.
 - [ ] Add ML Inference node with CPU / GPU capacity and batch-latency tradeoffs.
 
-## Ongoing Quality Tasks
+### Ongoing quality tasks
 
-- [ ] Keep README and TODO component counts and feature summaries aligned with the shipped node set.
+- [ ] Keep `README.md` and `TODO.md` component counts and feature summaries aligned with the shipped node set.
 - [ ] Keep traffic pattern documentation synchronized between the simulation engine and the simulation store.
 - [ ] Add more architecture templates that exercise multi-region failover, queue-heavy workloads, and service-mesh routing.
