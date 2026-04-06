@@ -40,6 +40,7 @@ Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulato
 - [ ] Add friendly warnings for unsupported combinations and partial-fidelity exports.
 - [ ] Add schema hints/autocomplete and an optional format action for the YAML editor.
 - [ ] Document the YAML DSL and workflow in `README.md` with example usage.
+- [ ] Create a dedicated IaC authoring tutorial document that walks users through writing simulator YAML step by step.
 
 
 ## Phase 1: Shipped Now
