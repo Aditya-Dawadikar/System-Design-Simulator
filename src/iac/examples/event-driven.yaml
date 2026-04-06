@@ -1,0 +1,272 @@
+version: 1
+name: event-driven-pipeline
+description: >
+  Event-driven data processing pipeline: traffic → API tier → Pub/Sub → worker fleet → storage.
+  Uses a rate limiter at the API layer, Pub/Sub for decoupling, a worker pool for async
+  processing, and cloud storage for results. Demonstrates queue-based backpressure and
+  async workload patterns in a single region.
+
+globals:
+  peakRps: 3000
+  trafficPattern: spike
+
+regions:
+  - id: us-central-1
+    label: us-central-1
+    zones:
+      - id: usc1a
+        label: us-central-1a
+      - id: usc1b
+        label: us-central-1b
+
+resources:
+  # ── Ingestion tier ────────────────────────────────────────────────────────
+
+  - id: tgen
+    type: traffic_generator
+    label: Traffic Generator
+    spec:
+      generatorRps: 3000
+      generatorPattern: spike
+      readRatioPct: 20
+
+  - id: cdn
+    type: cdn
+    label: Global CDN
+    placement:
+      scope: global
+    spec:
+      pops: 2
+      cacheablePct: 20
+      bandwidthGbps: 50
+
+  - id: firewall
+    type: firewall
+    label: Edge Firewall
+    placement:
+      region: us-central-1
+    spec:
+      firewallRules: 20
+      firewallInspectionMode: basic
+      firewallBlockRatePct: 5
+
+  - id: rate-limiter
+    type: rate_limiter
+    label: API Rate Limiter
+    placement:
+      region: us-central-1
+    spec:
+      rateLimitAlgorithm: token_bucket
+      requestsPerSecond: 2000
+      burstCapacity: 500
+      maxQueueSize: 1000
+
+  # ── API tier ──────────────────────────────────────────────────────────────
+
+  - id: api-gw
+    type: api_gateway
+    label: API Gateway
+    placement:
+      region: us-central-1
+    spec:
+      gatewayAuthEnabled: true
+      gatewayAuthOverheadMs: 5
+      gatewayCacheEnabled: true
+      gatewayCacheHitPct: 25
+
+  - id: api-a
+    type: app_server
+    label: API Server AZ-A
+    placement:
+      zone: usc1a
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 500
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 10
+        targetMetric: load
+        targetValue: 70
+
+  - id: api-b
+    type: app_server
+    label: API Server AZ-B
+    placement:
+      zone: usc1b
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 500
+      workloadType: io_bound
+
+  # ── Messaging tier ────────────────────────────────────────────────────────
+
+  - id: events-queue
+    type: pubsub
+    label: Events Queue
+    placement:
+      region: us-central-1
+    spec:
+      partitions: 8
+      messageRetentionHours: 48
+      maxMessageSizeKb: 256
+
+  # ── Processing tier ───────────────────────────────────────────────────────
+
+  - id: processor-a
+    type: worker_pool
+    label: Event Processor AZ-A
+    placement:
+      zone: usc1a
+    deploy:
+      workerCount: 8
+      threadCount: 4
+      taskDurationMs: 300
+
+  - id: processor-b
+    type: worker_pool
+    label: Event Processor AZ-B
+    placement:
+      zone: usc1b
+    deploy:
+      workerCount: 8
+      threadCount: 4
+      taskDurationMs: 300
+
+  - id: enrichment-fn
+    type: cloud_function
+    label: Enrichment Function
+    placement:
+      region: us-central-1
+    deploy:
+      functionMemoryMb: 512
+      maxConcurrency: 200
+      avgExecutionMs: 150
+
+  # ── Storage tier ──────────────────────────────────────────────────────────
+
+  - id: results-store
+    type: cloud_storage
+    label: Results Storage
+    placement:
+      region: us-central-1
+    spec:
+      storageThroughputMbps: 2000
+      objectSizeKb: 128
+      storageClass: standard
+
+  - id: metadata-db
+    type: database
+    label: Metadata DB
+    placement:
+      zone: usc1a
+    spec:
+      engine: PostgreSQL
+      shards: 1
+      storageGb: 200
+      maxConnections: 300
+      dbRole: primary
+
+  - id: cache
+    type: cache
+    label: Hot Data Cache
+    placement:
+      zone: usc1a
+    spec:
+      memoryGb: 8
+      ttlSeconds: 300
+      evictionPolicy: lfu
+
+connections:
+  # Ingestion flow
+  - from: tgen
+    to: cdn
+    protocol: REST
+
+  - from: cdn
+    to: firewall
+    protocol: REST
+
+  - from: firewall
+    to: rate-limiter
+    protocol: REST
+
+  - from: rate-limiter
+    to: api-gw
+    protocol: REST
+
+  # API tier
+  - from: api-gw
+    to: api-a
+    protocol: REST
+    splitPct: 50
+
+  - from: api-gw
+    to: api-b
+    protocol: REST
+    splitPct: 50
+
+  # Enqueue events
+  - from: api-a
+    to: events-queue
+    protocol: gRPC
+
+  - from: api-b
+    to: events-queue
+    protocol: gRPC
+
+  # Workers consume the queue
+  - from: events-queue
+    to: processor-a
+    protocol: gRPC
+    splitPct: 50
+
+  - from: events-queue
+    to: processor-b
+    protocol: gRPC
+    splitPct: 50
+
+  # Enrich via cloud function
+  - from: processor-a
+    to: enrichment-fn
+    protocol: REST
+
+  - from: processor-b
+    to: enrichment-fn
+    protocol: REST
+
+  # Write results
+  - from: enrichment-fn
+    to: results-store
+    protocol: REST
+
+  # API reads from cache / db
+  - from: api-a
+    to: cache
+    protocol: TCP
+
+  - from: api-a
+    to: metadata-db
+    protocol: TCP
+
+  - from: api-b
+    to: cache
+    protocol: TCP
+
+  - from: api-b
+    to: metadata-db
+    protocol: TCP
+
+scenarios:
+  - type: steady_state
+    enabled: true
+
+  - type: fail_zone
+    target: usc1a
+    enabled: false

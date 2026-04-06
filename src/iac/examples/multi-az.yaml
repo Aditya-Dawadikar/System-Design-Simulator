@@ -1,0 +1,257 @@
+version: 1
+name: multi-az-web-platform
+description: >
+  Multi-AZ web platform across us-east-1 and eu-west-1.
+  Each region has two availability zones with independent app server fleets and
+  a primary/replica database pair. A Global Accelerator routes traffic to the
+  nearest healthy region. Demonstrates zone failover and cross-region redundancy.
+
+globals:
+  peakRps: 5000
+  trafficPattern: wave
+
+regions:
+  - id: us-east-1
+    label: us-east-1
+    zones:
+      - id: use1a
+        label: us-east-1a
+      - id: use1b
+        label: us-east-1b
+
+  - id: eu-west-1
+    label: eu-west-1
+    zones:
+      - id: euw1a
+        label: eu-west-1a
+      - id: euw1b
+        label: eu-west-1b
+
+resources:
+  # ── Global traffic entry ──────────────────────────────────────────────────
+
+  - id: tgen
+    type: traffic_generator
+    label: Traffic Generator
+    spec:
+      generatorRps: 5000
+      generatorPattern: wave
+      readRatioPct: 65
+
+  - id: ga
+    type: global_accelerator
+    label: Global Accelerator
+    spec:
+      routingPolicy: latency
+      failoverEnabled: true
+
+  # ── us-east-1 ─────────────────────────────────────────────────────────────
+
+  - id: lb-use1
+    type: load_balancer
+    label: LB us-east-1
+    placement:
+      region: us-east-1
+    spec:
+      algorithm: least_conn
+      healthChecks: true
+
+  - id: app-use1a
+    type: app_server
+    label: App Server AZ-A
+    placement:
+      zone: use1a
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 12
+        targetMetric: load
+        targetValue: 70
+
+  - id: app-use1b
+    type: app_server
+    label: App Server AZ-B
+    placement:
+      zone: use1b
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 12
+        targetMetric: load
+        targetValue: 70
+
+  - id: cache-use1a
+    type: cache
+    label: Redis AZ-A
+    placement:
+      zone: use1a
+    spec:
+      memoryGb: 16
+      ttlSeconds: 120
+      evictionPolicy: lru
+      clusterMode: true
+
+  - id: db-primary-use1
+    type: database
+    label: DB Primary
+    placement:
+      zone: use1a
+    spec:
+      engine: PostgreSQL
+      shards: 2
+      storageGb: 500
+      maxConnections: 400
+      dbRole: primary
+
+  - id: db-replica-use1
+    type: database
+    label: DB Replica
+    placement:
+      zone: use1b
+    spec:
+      engine: PostgreSQL
+      shards: 2
+      storageGb: 500
+      maxConnections: 400
+      dbRole: replica
+      primaryNodeId: db-primary-use1
+
+  # ── eu-west-1 ─────────────────────────────────────────────────────────────
+
+  - id: lb-euw1
+    type: load_balancer
+    label: LB eu-west-1
+    placement:
+      region: eu-west-1
+    spec:
+      algorithm: least_conn
+      healthChecks: true
+
+  - id: app-euw1a
+    type: app_server
+    label: App Server EU AZ-A
+    placement:
+      zone: euw1a
+    deploy:
+      instances: 2
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: threshold
+        minInstances: 2
+        maxInstances: 8
+        scaleUpCpuPct: 75
+        scaleDownCpuPct: 25
+
+  - id: app-euw1b
+    type: app_server
+    label: App Server EU AZ-B
+    placement:
+      zone: euw1b
+    deploy:
+      instances: 2
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      workloadType: io_bound
+
+  - id: db-primary-euw1
+    type: database
+    label: DB Primary EU
+    placement:
+      zone: euw1a
+    spec:
+      engine: PostgreSQL
+      shards: 1
+      storageGb: 300
+      maxConnections: 200
+      dbRole: primary
+
+connections:
+  # Global entry
+  - from: tgen
+    to: ga
+    protocol: REST
+
+  # GA → regional load balancers
+  - from: ga
+    to: lb-use1
+    protocol: REST
+    splitPct: 60
+
+  - from: ga
+    to: lb-euw1
+    protocol: REST
+    splitPct: 40
+
+  # us-east-1 routing
+  - from: lb-use1
+    to: app-use1a
+    protocol: REST
+    splitPct: 50
+
+  - from: lb-use1
+    to: app-use1b
+    protocol: REST
+    splitPct: 50
+
+  - from: app-use1a
+    to: cache-use1a
+    protocol: TCP
+
+  - from: app-use1b
+    to: cache-use1a
+    protocol: TCP
+
+  - from: app-use1a
+    to: db-primary-use1
+    protocol: TCP
+
+  - from: app-use1b
+    to: db-replica-use1
+    protocol: TCP
+
+  # eu-west-1 routing
+  - from: lb-euw1
+    to: app-euw1a
+    protocol: REST
+    splitPct: 50
+
+  - from: lb-euw1
+    to: app-euw1b
+    protocol: REST
+    splitPct: 50
+
+  - from: app-euw1a
+    to: db-primary-euw1
+    protocol: TCP
+
+  - from: app-euw1b
+    to: db-primary-euw1
+    protocol: TCP
+
+scenarios:
+  - type: fail_zone
+    target: use1a
+    enabled: false
+
+  - type: fail_zone
+    target: euw1a
+    enabled: false

@@ -12,16 +12,19 @@
     "test:unit:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "js-yaml": "^4.1.1",
     "lucide-react": "^1.0.1",
     "next": "^16.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "reactflow": "^11.11.4",
     "recharts": "^3.8.0",
+    "zod": "^4.3.6",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

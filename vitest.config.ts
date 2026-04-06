@@ -13,7 +13,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       reportsDirectory: 'coverage/unit',
-      include: ['src/simulation/**/*.ts'],
+      include: ['src/simulation/**/*.ts', 'src/iac/**/*.ts'],
     },
   },
 });

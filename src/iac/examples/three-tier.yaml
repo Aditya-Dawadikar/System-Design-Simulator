@@ -1,0 +1,100 @@
+version: 1
+name: three-tier-web-app
+description: >
+  Classic three-tier web application: CDN → load balancer → app servers → cache + database.
+  Single region, single availability zone. Good starting point for a basic web backend.
+
+globals:
+  peakRps: 2000
+  trafficPattern: steady
+
+regions:
+  - id: us-east-1
+    label: us-east-1
+    zones:
+      - id: use1a
+        label: us-east-1a
+
+resources:
+  - id: tgen
+    type: traffic_generator
+    label: Traffic Generator
+    spec:
+      generatorRps: 2000
+      generatorPattern: steady
+      readRatioPct: 70
+
+  - id: cdn
+    type: cdn
+    label: Global CDN
+    placement:
+      scope: global
+    spec:
+      pops: 3
+      cacheablePct: 60
+      bandwidthGbps: 100
+
+  - id: lb
+    type: load_balancer
+    label: Application LB
+    placement:
+      region: us-east-1
+    spec:
+      algorithm: round_robin
+      healthChecks: true
+
+  - id: app
+    type: app_server
+    label: App Server
+    placement:
+      zone: use1a
+    deploy:
+      instances: 2
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 500
+      workloadType: io_bound
+
+  - id: redis
+    type: cache
+    label: Redis Cache
+    placement:
+      zone: use1a
+    spec:
+      memoryGb: 8
+      ttlSeconds: 60
+      evictionPolicy: lru
+
+  - id: db
+    type: database
+    label: PostgreSQL
+    placement:
+      zone: use1a
+    spec:
+      engine: PostgreSQL
+      shards: 1
+      storageGb: 100
+      maxConnections: 200
+      dbRole: standalone
+
+connections:
+  - from: tgen
+    to: cdn
+    protocol: REST
+
+  - from: cdn
+    to: lb
+    protocol: REST
+    timeoutMs: 3000
+
+  - from: lb
+    to: app
+    protocol: REST
+
+  - from: app
+    to: redis
+    protocol: TCP
+
+  - from: app
+    to: db
+    protocol: TCP
