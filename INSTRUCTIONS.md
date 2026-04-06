@@ -1,577 +1,454 @@
-# System Design Playground — Claude Code Prompt
-## Phase 1: Drag & Drop Canvas + 3-Tier Simulation Dashboard
+# System Design Simulator - Implementation Instructions
+## Current Phase: Terraform-like YAML Infrastructure Authoring
 
 ---
 
-## PRODUCT VISION (context for all decisions)
+## PRODUCT CONTEXT
 
-We are building a **System Design Playground** — a visual tool where engineers and students can:
-1. Drag and drop infrastructure components onto a canvas
-2. Wire them together to form an architecture
-3. Run traffic simulations on the designed topology
-4. Observe failures, bottlenecks, and scaling behavior in real time
+Phase 1 is already in place: the simulator has a visual canvas, component library, inspector, simulation engine, dashboard, and scenario support.
 
-The long-term vision includes multi-layer views (Hardware → Network → K8s → Services → Data),
-Terraform/Kubernetes YAML import to auto-generate topologies, node template configuration
-(CPU/RAM/GPU), region/AZ modeling, and chaos engineering scenarios.
+The next phase is to add an **Infrastructure-as-Code authoring workflow** so a user can define an entire system in one YAML file and have the simulator build and configure the topology automatically.
 
-**Phase 1 scope: nail the foundation.** A polished drag-and-drop canvas with a 3-tier
-architecture (CDN → Load Balancer → App Servers → Cache → Database) and a live simulation
-dashboard. Everything else builds on top of this.
+This feature should feel inspired by Terraform, but tailored to the simulator:
+- declarative
+- human-readable
+- single-file first
+- strongly validated
+- easy to round-trip between YAML and the canvas
+
+The YAML will be used to describe infrastructure, service placement, connectivity, traffic behavior, and deployment settings inside the simulator.
 
 ---
 
-## TECH STACK
+## PHASE GOAL
 
-- **Framework**: React (Vite)
-- **Canvas**: React Flow (https://reactflow.dev) — handles drag/drop, pan/zoom, edge wiring
-- **Styling**: Tailwind CSS
-- **State**: Zustand
-- **Charts/Metrics**: Recharts
-- **Icons**: Lucide React
-- **Language**: TypeScript
+Enable this core workflow:
 
-Install dependencies:
-```bash
-npm create vite@latest system-design-playground -- --template react-ts
-cd system-design-playground
-npm install reactflow zustand recharts lucide-react
-npm install -D tailwindcss postcss autoprefixer
-npx tailwindcss init -p
+1. User opens a YAML editor in the app
+2. User writes or pastes one simulator YAML document
+3. The app validates the document and shows clear errors if needed
+4. On import/apply, the canvas is generated automatically
+5. All node configs, edge configs, placement, scaling, and traffic settings are populated
+6. The simulation can run immediately against the generated topology
+7. Later, the current canvas can be exported back to YAML
+
+If this loop works well, the app becomes both:
+- a visual simulator
+- a lightweight system-design IaC playground
+
+---
+
+## IMPORTANT PRODUCT RULE
+
+This is **not** real Terraform execution against AWS, GCP, or Azure.
+
+We are building a **Terraform-like YAML DSL for the simulator itself**.
+It should model infrastructure and service deployment in the application, not provision real cloud resources.
+
+Think:
+- `terraform plan/apply` experience
+- YAML syntax instead of HCL
+- simulator-native resources and deployment semantics
+
+---
+
+## TECH STACK (CURRENT CODEBASE)
+
+- **Framework**: `Next.js`
+- **UI**: `React`
+- **Canvas**: `React Flow`
+- **State**: `Zustand`
+- **Styling**: `Tailwind CSS`
+- **Charts**: `Recharts`
+- **Language**: `TypeScript`
+
+The YAML pipeline should plug into the existing `architectureStore`, `simulationStore`, `SimulationEngine.ts`, and canvas/inspector workflow.
+
+---
+
+## PHASE SCOPE
+
+### In scope
+- YAML schema for simulator-defined infrastructure
+- Parser + validator
+- Transform YAML into `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`
+- `Apply YAML` action that populates the canvas
+- Structured error messages with line/context when possible
+- Starter examples/templates
+- Export current topology back into YAML
+- Deterministic round-trip behavior where practical
+
+### Nice to have in this phase, but not needed
+- YAML live preview / diff before apply
+- Format button
+- Schema hints / autocomplete
+- Import warnings for unsupported or invalid combinations
+
+### Explicitly out of scope
+- Real cloud provisioning
+- Terraform provider compatibility
+- HCL parsing
+- Secrets management
+- Remote state files / backend config
+- Modules, workspaces, and interpolation parity with Terraform
+- CI/CD deployment to real infrastructure
+
+---
+
+## DESIGN PRINCIPLES FOR THE YAML DSL
+
+1. **Single file first**
+   - One file should be enough to describe a working topology.
+
+2. **Declarative, not imperative**
+   - Users declare desired resources and connections.
+   - The app builds the canvas from that state.
+
+3. **Stable IDs**
+   - Every resource must have a unique `id`.
+   - Connections refer to resource IDs.
+
+4. **Simulator-native vocabulary**
+   - Use the current component types such as `cdn`, `load_balancer`, `app_server`, `cache`, `database`, etc.
+
+5. **Explicit placement**
+   - `global`, `region`, and `zone` placement should map cleanly to the simulator's scope model.
+
+6. **Predictable mapping**
+   - YAML fields should map directly to existing `NodeConfig` and `EdgeConfig` fields wherever possible.
+
+7. **Human-readable errors**
+   - Validation must explain what is wrong and how to fix it.
+
+---
+
+## PROPOSED YAML SHAPE
+
+The first version should support these top-level sections:
+
+```yaml
+version: 1
+name: checkout-platform
+description: Multi-AZ API with cache and database
+
+globals:
+  peakRps: 4500
+  trafficPattern: ramp
+
+regions:
+  - id: us-east-1
+    label: us-east-1
+    zones:
+      - id: use1a
+        label: us-east-1a
+      - id: use1b
+        label: us-east-1b
+
+resources:
+  - id: edge
+    type: cdn
+    label: Global CDN
+    placement:
+      scope: global
+    spec:
+      pops: 4
+      cacheablePct: 70
+      bandwidthGbps: 150
+
+  - id: api-lb
+    type: load_balancer
+    label: Public API LB
+    placement:
+      region: us-east-1
+    spec:
+      algorithm: least_conn
+      healthChecks: true
+
+  - id: api-a
+    type: app_server
+    label: API Server A
+    placement:
+      zone: use1a
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 10
+        targetMetric: load
+        targetValue: 70
+
+  - id: api-b
+    type: app_server
+    label: API Server B
+    placement:
+      zone: use1b
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+
+  - id: redis
+    type: cache
+    label: Session Cache
+    placement:
+      zone: use1a
+    spec:
+      memoryGb: 16
+      ttlSeconds: 120
+      evictionPolicy: lru
+
+  - id: postgres-primary
+    type: database
+    label: Orders DB
+    placement:
+      zone: use1b
+    spec:
+      engine: PostgreSQL
+      shards: 2
+      storageGb: 500
+      maxConnections: 400
+      dbRole: primary
+
+connections:
+  - from: edge
+    to: api-lb
+    protocol: REST
+    timeoutMs: 3000
+
+  - from: api-lb
+    to: api-a
+    protocol: REST
+    splitPct: 50
+
+  - from: api-lb
+    to: api-b
+    protocol: REST
+    splitPct: 50
+
+  - from: api-a
+    to: redis
+    protocol: TCP
+
+  - from: api-a
+    to: postgres-primary
+    protocol: TCP
+
+scenarios:
+  - type: steady_state
+  - type: fail_zone
+    target: use1a
+    enabled: false
 ```
 
 ---
 
-## VISUAL DESIGN DIRECTION
+## YAML-TO-SIMULATOR MAPPING
 
-Dark terminal/datacenter aesthetic. Think server room monitoring dashboard.
-
-```
-Background:     #05070b  (near black)
-Panel:          #0b1016
-Border:         #172030
-Accent green:   #00ff88  (healthy/running)
-Accent cyan:    #00ddff  (CDN/gateway)
-Accent yellow:  #ffcc00  (warning/stressed)
-Accent red:     #ff3355  (failed/critical)
-Accent purple:  #bb66ff  (database)
-Accent orange:  #ff8833  (cache)
-Accent pink:    #ff55bb  (load balancer)
-Text:           #b0c8e0
-Text dim:       #a1b3bf
-Font:           'JetBrains Mono', monospace (use Google Fonts)
-```
-
-Every component card should feel like a real monitoring widget — live metrics, sparklines,
-status indicators, load gauges. NOT a generic flowchart box.
+| YAML concept | Maps to |
+|---|---|
+| `resources[]` | React Flow `nodes[]` |
+| `connections[]` | React Flow `edges[]` |
+| `placement.region` | `nodeConfig.regionId` |
+| `placement.zone` | `nodeConfig.zoneId` |
+| `spec.*` / `deploy.*` | `nodeConfigs[nodeId]` |
+| `protocol`, `timeoutMs`, `retryCount`, `splitPct` | `edgeConfigs[edgeId]` |
+| `globals.peakRps` | simulation control defaults |
+| `globals.trafficPattern` | simulation pattern default |
+| `scenarios[]` | later scenario/failure presets |
 
 ---
 
-## APPLICATION STRUCTURE
+## MINIMUM SUPPORTED RESOURCE TYPES FOR V1
 
+The initial YAML importer/exporter must support the existing simulator resource set, prioritizing:
+
+- `traffic_generator`
+- `cdn`
+- `global_accelerator`
+- `load_balancer`
+- `api_gateway`
+- `app_server`
+- `cache`
+- `database`
+- `pubsub`
+- `cloud_function`
+- `worker_pool`
+- `cloud_storage`
+- `rate_limiter`
+- `service_mesh`
+- `nat_gateway`
+- `firewall`
+- `region`
+- `availability_zone`
+
+If a type already exists in the simulator, prefer enabling it in YAML rather than inventing a parallel model.
+
+---
+
+## VALIDATION RULES
+
+The first validator should catch at least:
+
+- Missing `version`
+- Missing or duplicate resource IDs
+- Unknown `type`
+- Invalid `from` / `to` connection targets
+- Zone references that do not exist
+- Regional resources missing `placement.region`
+- Zonal resources missing `placement.zone`
+- Global resources incorrectly pinned to a zone
+- Unsupported fields for a given resource type
+- Invalid enum values
+- Circular references or impossible topologies when they matter
+
+Validation should return:
+- Message
+- Severity (`error` / `warning`)
+- YAML path if available
+- Line/column if available
+
+---
+
+## INTERNAL ARCHITECTURE FOR THIS FEATURE
+
+Implement the feature as a small compiler pipeline:
+
+```text
+YAML text
+  -> parse
+  -> validate schema
+  -> normalize defaults
+  -> resolve placement / references
+  -> convert to simulator topology
+  -> apply to stores
+  -> render on canvas
 ```
+
+Recommended folder direction:
+
+```text
 src/
-├── components/
-│   ├── canvas/
-│   │   ├── Canvas.tsx              # React Flow wrapper, pan/zoom
-│   │   ├── ComponentNode.tsx       # Base node renderer
-│   │   ├── EdgeWire.tsx            # Custom animated edge
-│   │   └── nodes/
-│   │       ├── CdnNode.tsx
-│   │       ├── LoadBalancerNode.tsx
-│   │       ├── AppServerNode.tsx
-│   │       ├── CacheNode.tsx
-│   │       └── DatabaseNode.tsx
-│   ├── sidebar/
-│   │   ├── ComponentLibrary.tsx    # Draggable component palette
-│   │   └── ComponentItem.tsx       # Individual draggable item
-│   ├── inspector/
-│   │   ├── Inspector.tsx           # Right panel — selected node config
-│   │   └── fields/                 # Config fields per component type
-│   ├── simulation/
-│   │   ├── SimulationEngine.ts     # Core sim logic (tick-based)
-│   │   ├── SimulationControls.tsx  # RPS slider, pattern picker, run/stop
-│   │   └── MetricsDashboard.tsx    # Bottom panel — live charts
-│   └── shared/
-│       ├── Sparkline.tsx
-│       ├── ArcGauge.tsx
-│       ├── Badge.tsx
-│       └── StatCell.tsx
-├── store/
-│   ├── architectureStore.ts        # Nodes, edges, component configs
-│   └── simulationStore.ts          # Running state, metrics, history
-├── types/
-│   └── index.ts                    # All shared TypeScript types
-└── constants/
-    └── components.ts               # Component definitions & defaults
++-- iac/
+|   +-- schema.ts              # types / zod schema / validation helpers
+|   +-- parser.ts              # YAML parse + error handling
+|   +-- validate.ts            # semantic validation
+|   +-- normalize.ts           # fill defaults / ids / derived values
+|   +-- toTopology.ts          # YAML model -> nodes/edges/config maps
+|   +-- fromTopology.ts        # export current canvas -> YAML model
+|   +-- examples/
+|       +-- three-tier.yaml
+|       +-- multi-az.yaml
+|       +-- event-driven.yaml
 ```
+
+Use small pure functions and keep the importer/exporter testable without UI.
 
 ---
 
-## PHASE 1 COMPONENTS (the 3-tier stack)
+## UI / UX REQUIREMENTS
 
-These are the ONLY components needed for Phase 1. Build them well — they are templates
-for every future component.
+Add a simple but polished authoring workflow:
 
-### 1. CDN
-```typescript
-{
-  type: 'cdn',
-  label: 'CDN Edge',
-  icon: '◎',
-  color: '#00ddff',
-  defaults: {
-    pops: 2,                    // Points of presence (1-4)
-    cacheablePct: 60,           // % of traffic served from edge
-    bandwidthGbps: 100,         // Total edge bandwidth
-  },
-  capacity: {
-    rpsPerPop: 25000,
-  }
-}
-```
+### YAML editor experience
+- A panel, modal, or drawer for editing YAML
+- Starter template button
+- `Apply` / `Validate` / `Reset` actions
+- Clear error list when parsing fails
+- Do not partially mutate the canvas on invalid apply
 
-### 2. Load Balancer
-```typescript
-{
-  type: 'load_balancer',
-  label: 'Load Balancer',
-  icon: '⇌',
-  color: '#ff55bb',
-  defaults: {
-    algorithm: 'round_robin',   // round_robin | least_conn | ip_hash | random | weighted
-    healthChecks: true,
-    maxConnections: 100000,
-  },
-  capacity: {
-    rpsMax: 50000,
-  }
-}
-```
+### Canvas sync behavior
+- Applying valid YAML replaces or refreshes the current topology deterministically
+- Node positions may be auto-laid out initially
+- Users can still manually refine the canvas after import
 
-### 3. App Server
-```typescript
-{
-  type: 'app_server',
-  label: 'App Server',
-  icon: '◈',
-  color: '#00ff88',
-  defaults: {
-    instances: 2,               // Horizontal replicas (1-16)
-    cpuCores: 4,
-    ramGb: 8,
-    rpsPerInstance: 500,        // Throughput capacity per instance
-    avgLatencyMs: 40,           // Base processing latency
-  }
-}
-```
-
-### 4. Cache (Redis)
-```typescript
-{
-  type: 'cache',
-  label: 'Redis Cache',
-  icon: '⚡',
-  color: '#ff8833',
-  defaults: {
-    memoryGb: 8,
-    ttlSeconds: 60,
-    evictionPolicy: 'lru',      // lru | lfu | noeviction
-    clusterMode: false,
-  },
-  capacity: {
-    rpsMax: 100000,
-  }
-}
-```
-
-### 5. Database
-```typescript
-{
-  type: 'database',
-  label: 'PostgreSQL',
-  icon: '▣',
-  color: '#bb66ff',
-  defaults: {
-    instanceType: 'db.m5.large',
-    storageGb: 100,
-    maxConnections: 200,
-    readReplicas: 0,            // 0-4
-    shards: 1,                  // 1-4
-    rpsPerShard: 800,
-  }
-}
-```
+### Export behavior
+- Export current canvas into readable YAML
+- Preserve stable IDs when possible
+- Keep field ordering consistent for clean diffs
 
 ---
 
-## CANVAS BEHAVIOR
+## INCREMENTAL IMPLEMENTATION PLAN
 
-### Drag from sidebar → canvas
-- Component library on the left shows all available components
-- User drags a component → it drops onto the canvas as a node
-- Node immediately shows its label, icon, color, and default config
-- Node is selectable (click to open inspector on right)
+Build this phase in small, working steps:
 
-### Wiring
-- Hover over a node → connection handles appear (React Flow standard)
-- Drag from handle to handle to create a wire (edge)
-- Edge shows: protocol label (REST/gRPC/TCP), animated flow dots when simulation running
-- Edge color matches the source node color
-- Click edge to configure: latency, bandwidth cap, protocol, timeout
-
-### Canvas controls
-- Mouse wheel / pinch to zoom
-- Click + drag empty space to pan
-- Right-click node → Delete, Duplicate, Configure
-- Select multiple nodes → group them
-- Keyboard: Delete to remove selected, Ctrl+Z to undo
-
-### Pre-loaded starter template
-When the app loads for the first time, the canvas is NOT empty. It loads a default
-3-tier architecture so users immediately see the value:
-
-```
-[CDN] ──→ [Load Balancer] ──→ [App Server x2]
-                                      │
-                          [Redis Cache] ←→ [PostgreSQL]
+```text
+Step 1: Define the YAML DSL contract and examples in code
+Step 2: Add YAML parsing with safe error handling
+Step 3: Add schema + semantic validation
+Step 4: Convert validated YAML into simulator topology data
+Step 5: Add `Apply YAML` to populate the canvas/store
+Step 6: Add a basic YAML editor UI with validation feedback
+Step 7: Support export from current topology back to YAML
+Step 8: Add round-trip tests and fixture coverage
+Step 9: Add templates for common architectures
+Step 10: Polish UX (formatting, docs, examples, diff/preview)
 ```
 
-This is the "hello world" of the playground. User can run simulation immediately
-without configuring anything.
+Each step should leave the app runnable and demonstrably improved.
 
 ---
 
-## SIMULATION ENGINE
+## TESTING REQUIREMENTS
 
-The simulation engine is tick-based (runs every 500ms when active).
+This feature must be implemented with real behavior tests, not mock-only UI tests.
 
-### Core algorithm (per tick):
+Add focused tests for:
+- Parse success / parse failure
+- Duplicate IDs
+- Invalid references
+- Correct region/zone assignment
+- Correct node and edge counts after import
+- Config mapping for `app_server`, `database`, `load_balancer`, and `cdn`
+- Round-trip export/import stability for representative templates
 
-```typescript
-function simulateTick(topology: Topology, incomingRps: number): TickResult {
-  // 1. Traverse the graph in topological order (BFS from source nodes)
-  // 2. For each node, compute:
-  //    - rpsIn: traffic arriving from upstream connections
-  //    - capacity: based on node config (instances × rpsPerInstance, etc.)
-  //    - load: rpsIn / capacity (0.0 to 1.2+)
-  //    - failed: load > 1.05
-  //    - latency: base + queueing factor (load²) + upstream latencies
-  //    - errorRate: 0 when healthy, spikes when overloaded
-  //    - rpsOut: rpsIn × (1 - dropRate) — what passes to downstream
-  // 3. Special rules:
-  //    - CDN: absorbs cacheablePct% of traffic, only originRps flows downstream
-  //    - Cache: hitRate reduces DB load by up to 85%
-  //    - LoadBalancer: distributes rpsOut evenly across connected App Servers
-  //    - Database: total capacity = shards × rpsPerShard
-  // 4. Return metrics for every node + edge
-}
-```
-
-### Traffic patterns (same as our prototypes):
-- STEADY: constant at peak
-- RAMP: linear increase to 1.6× peak over 60s
-- SPIKE: 3.5× every 30s, baseline 0.35×
-- WAVE: sinusoidal
-- CHAOS: random multiplier each tick
-
-### What the simulation must handle:
-- **Arbitrary topologies** — not hardcoded 3-tier. User might connect CDN → DB directly. Handle it.
-- **Cascading failures** — if a node fails, downstream nodes receive 0 rps or error responses
-- **Disconnected nodes** — nodes with no incoming connections get 0 traffic (they're idle)
-- **Cycles** — detect and warn, don't infinite loop
+Prefer unit tests around pure YAML transformation functions plus a few integration tests for store application.
 
 ---
 
-## INSPECTOR PANEL (right sidebar)
+## WHAT SUCCESS LOOKS LIKE FOR THIS PHASE
 
-When a node is selected, the Inspector shows its configuration form.
+A user should be able to:
 
-Each component type has its own field set:
+1. Open the YAML authoring surface
+2. Paste a valid simulator YAML file
+3. Click `Apply`
+4. See the full architecture appear on the canvas automatically
+5. Run the simulation immediately with the imported topology
+6. Export the current design back to YAML and get a clean, readable document
 
-**App Server inspector:**
-```
-Instances        [slider 1-16, shows instance squares like our v5]
-CPU per instance [select: 2/4/8/16 cores]
-RAM per instance [select: 4/8/16/32 GB]
-RPS per instance [number input, default 500]
-Base latency     [slider 5-500ms]
-```
-
-**Database inspector:**
-```
-Engine           [select: PostgreSQL / MySQL / MongoDB / Redis / Cassandra]
-Shards           [slider 1-8, shows capacity = shards × 800]
-Read Replicas    [slider 0-4]
-Max Connections  [number 10-10000]
-Storage          [slider 10-10000 GB]
-```
-
-**Edge (wire) inspector:**
-```
-Protocol         [REST / gRPC / TCP / WebSocket]
-Timeout          [ms]
-Retry count      [0-5]
-Circuit breaker  [toggle]
-  └── Error threshold [% 0-100]
-  └── Recovery timeout [ms]
-Bandwidth cap    [Mbps, 0 = unlimited]
-```
-
-Changes in inspector immediately affect the next simulation tick.
+If that loop works reliably, the phase is successful.
 
 ---
 
-## METRICS DASHBOARD (bottom panel)
+## FUTURE PHASES AFTER THIS
 
-Always visible. Shows live metrics for the running simulation.
+Do not block this phase on these, but keep the design extensible for:
 
-### Layout:
-```
-┌─────────────────────────────────────────────────────────────┐
-│ ▶ SIMULATION  [STEADY ▾] Peak RPS: ████████ 3000  [RUN] [↺] │
-├──────────┬──────────┬──────────┬──────────┬─────────────────┤
-│ LIVE RPS │ E2E LAT  │ ERR RATE │ STATUS   │ [node selector] │
-│  3,000   │   142ms  │  0.0%    │ HEALTHY  │                 │
-├──────────┴──────────┴──────────┴──────────┴─────────────────┤
-│                                                             │
-│  [Per-node metric cards — one per node in topology]        │
-│  Each shows: load gauge, RPS, latency, error%, sparkline   │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│  EVENT LOG  T+12s › CDN warmed up — 68% edge hit rate      │
-│             T+15s ⚠ App servers at 82% — scaling up?       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Per-node metric card (in dashboard):
-- Matches the color of the node on canvas
-- Arc gauge showing load %
-- RPS in/out
-- Avg latency + P99
-- Error rate (red when > 5%)
-- 40-point sparkline of RPS history
-- Status badge: OK / STRESSED / CRITICAL / FAILED
-
-### The canvas nodes ALSO show live metrics:
-When simulation is running, each node on the canvas updates in real time:
-- Border color changes: green → yellow → red based on load
-- Shows current RPS and load % inside the node
-- Animated edge dots speed up with more traffic, turn red on failure
+- Reusable modules
+- Variables and environment overrides
+- Schema-driven autocomplete
+- Live plan/diff visualization
+- Scenario bundles
+- Kubernetes-style workload blocks
+- Cost estimation from YAML
+- AI-assisted YAML generation from prompts
 
 ---
 
-## EVENT LOG
+## NOTES FOR IMPLEMENTATION
 
-A scrolling log at the bottom showing simulation events with timestamps:
-
-```typescript
-type LogEvent = {
-  tick: number;         // simulation time in seconds
-  level: 'info' | 'warn' | 'error' | 'k8s';
-  message: string;
-  nodeId?: string;      // highlight the relevant node
-}
-```
-
-Examples:
-```
-T+0s   › Simulation started — 3,000 rps STEADY pattern
-T+3s   › CDN warming up — 31% edge hit rate
-T+8s   › CDN warmed — 68% edge hit rate, 2,040 rps absorbed
-T+12s  ⚠ App Server load at 78% — approaching capacity
-T+15s  ✕ Database OVERLOADED — 1,200 rps vs 800 capacity
-T+15s  ✕ Cascade: App Server receiving DB errors
-T+18s  › User scaled Database to 2 shards — capacity now 1,600 rps
-T+19s  › Database recovered
-```
-
----
-
-## STATE MANAGEMENT (Zustand stores)
-
-### architectureStore
-```typescript
-interface ArchitectureStore {
-  nodes: Node[];                    // React Flow nodes
-  edges: Edge[];                    // React Flow edges
-  nodeConfigs: Record<string, NodeConfig>;  // Per-node settings
-  selectedNodeId: string | null;
-
-  addNode: (type: ComponentType, position: XYPosition) => void;
-  removeNode: (id: string) => void;
-  updateNodeConfig: (id: string, config: Partial<NodeConfig>) => void;
-  addEdge: (edge: Edge) => void;
-  removeEdge: (id: string) => void;
-  updateEdgeConfig: (id: string, config: Partial<EdgeConfig>) => void;
-  setSelectedNode: (id: string | null) => void;
-  loadTemplate: (template: ArchitectureTemplate) => void;
-  exportToJSON: () => string;
-  importFromJSON: (json: string) => void;
-}
-```
-
-### simulationStore
-```typescript
-interface SimulationStore {
-  running: boolean;
-  tick: number;
-  peakRps: number;
-  pattern: TrafficPattern;
-  nodeMetrics: Record<string, NodeMetrics>;
-  edgeMetrics: Record<string, EdgeMetrics>;
-  events: LogEvent[];
-  history: Record<string, number[]>;   // nodeId → last 40 RPS values
-
-  start: () => void;
-  stop: () => void;
-  reset: () => void;
-  setPeakRps: (rps: number) => void;
-  setPattern: (pattern: TrafficPattern) => void;
-  _tick: () => void;                   // internal, called by interval
-}
-```
-
----
-
-## TYPESCRIPT TYPES
-
-```typescript
-type ComponentType =
-  | 'cdn'
-  | 'load_balancer'
-  | 'app_server'
-  | 'cache'
-  | 'database';
-
-type TrafficPattern = 'steady' | 'ramp' | 'spike' | 'wave' | 'chaos';
-
-type LoadBalancerAlgorithm =
-  | 'round_robin'
-  | 'least_conn'
-  | 'ip_hash'
-  | 'random'
-  | 'weighted';
-
-interface NodeMetrics {
-  rpsIn: number;
-  rpsOut: number;
-  load: number;           // 0.0 to 1.2+
-  latencyMs: number;
-  p99LatencyMs: number;
-  errorRate: number;      // 0.0 to 1.0
-  failed: boolean;
-}
-
-interface EdgeMetrics {
-  rps: number;
-  latencyMs: number;
-  isBottleneck: boolean;
-}
-
-interface NodeConfig {
-  // CDN
-  pops?: number;
-  cacheablePct?: number;
-  // Load Balancer
-  algorithm?: LoadBalancerAlgorithm;
-  healthChecks?: boolean;
-  // App Server
-  instances?: number;
-  cpuCores?: number;
-  ramGb?: number;
-  rpsPerInstance?: number;
-  avgLatencyMs?: number;
-  // Cache
-  memoryGb?: number;
-  ttlSeconds?: number;
-  // Database
-  shards?: number;
-  readReplicas?: number;
-  maxConnections?: number;
-}
-
-interface EdgeConfig {
-  protocol: 'REST' | 'gRPC' | 'TCP' | 'WebSocket';
-  timeoutMs: number;
-  retryCount: number;
-  circuitBreaker: boolean;
-  circuitBreakerThreshold: number;
-  bandwidthMbps: number;        // 0 = unlimited
-}
-```
-
----
-
-## WHAT SUCCESS LOOKS LIKE FOR PHASE 1
-
-A user opens the app and within 30 seconds can:
-
-1. See a pre-loaded 3-tier architecture on the canvas
-2. Hit RUN and watch live metrics appear on every component
-3. Drag the RPS slider up until the database turns red
-4. Click the database, increase shards from 1 to 2 in the inspector, watch it recover
-5. Drag a second App Server from the library, drop it on canvas, wire it to the Load Balancer
-6. Watch load distribute across both app servers
-
-That's the core loop. Everything else is polish.
-
----
-
-## EXPLICITLY OUT OF SCOPE FOR PHASE 1
-
-Do NOT build these yet — they are future phases:
-- K8s cluster view / pod management
-- Node templates (CPU/RAM/GPU editor)
-- Region / AZ / VPC hierarchy
-- Terraform import/export
-- Kafka / message queues
-- Service mesh
-- Chaos scenarios
-- Cost estimator
-- User accounts / saving to cloud
-- Collaboration features
-- Mobile layout
-
----
-
-## IMPLEMENTATION ORDER
-
-Build in this exact order to always have something runnable:
-
-```
-Step 1: Project setup + Tailwind + fonts + color tokens
-Step 2: Empty canvas with React Flow (pan, zoom, empty)
-Step 3: Component library sidebar (draggable items, no canvas drop yet)
-Step 4: Drag from sidebar → drops onto canvas as styled node
-Step 5: Wire two nodes together (React Flow edges)
-Step 6: Inspector panel opens on node click (read-only first)
-Step 7: Inspector fields are editable, updates node label/config
-Step 8: Load default 3-tier template on startup
-Step 9: Simulation engine (SimulationEngine.ts) — pure logic, no UI
-Step 10: Simulation controls (RPS slider, pattern, run/stop)
-Step 11: Node metrics update on canvas during simulation (color, load %)
-Step 12: Metrics dashboard (bottom panel, per-node cards, sparklines)
-Step 13: Event log
-Step 14: Edge animation during simulation (flow dots, color changes)
-Step 15: Polish — transitions, empty states, keyboard shortcuts
-```
-
----
-
-## NOTES FOR CLAUDE CODE
-
-- Use React Flow's `nodeTypes` to register all custom node components
-- Use React Flow's `onDrop` + `onDragOver` for sidebar-to-canvas drag
-- The simulation engine should be a plain TypeScript class/module, NOT a React component
-- Run simulation with `setInterval(store._tick, 500)` managed in simulationStore
-- Keep simulation logic pure — takes topology + config as input, returns metrics as output
-- Use `useCallback` and `useMemo` aggressively — simulation updates every 500ms
-- All monetary values use USD, all latency in ms, all throughput in rps or Mbps
-- Persist architecture to localStorage on every change (auto-save)
-- The canvas should have a subtle grid background (React Flow has this built in)
-- Custom edges should use `EdgeLabelRenderer` for the protocol label
-
-Start with Step 1. Ask for confirmation before moving to the next step.
-Each step should result in a working, runnable state before proceeding.
-```
+- Keep the YAML schema aligned with existing `ComponentType`, `NodeConfig`, and `EdgeConfig` shapes.
+- Prefer a simulator-specific DSL over pretending to support full Terraform compatibility.
+- Do not couple parsing logic to React components.
+- Keep import/export code pure and testable.
+- Favor deterministic output so exported YAML remains diff-friendly.
+- Validation errors must be actionable and easy to understand.
+- Build incrementally and keep the app working at every step.
