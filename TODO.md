@@ -20,6 +20,7 @@ Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulato
 - [x] Convert validated YAML into simulator `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`.
 - [x] Add a safe `Apply YAML` flow that only updates the stores and canvas when validation passes.
 - [x] Auto-generate simulator IaC whenever a topology is created or edited through drag-and-drop on the canvas.
+- [ ] Add Kubernetes-style deployment IaC blocks that can fan out one shared service definition into identical nodes across multiple regions and availability zones for `app_server`, `database`, and key network primitives, reusing the same node template, placement policy, and autoscaling or replication behavior where applicable.
 - [ ] Add IaC coverage for all existing architecture templates and shipped starter architectures.
 - [x] Ensure a brand-new screen starts with both the canvas and the IaC editor empty.
 - [x] Keep the canvas and IaC in full two-way sync at all times, regardless of whether edits start in the editor or on the canvas.
