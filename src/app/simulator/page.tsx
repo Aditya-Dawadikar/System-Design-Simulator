@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { ReactFlowProvider } from 'reactflow';
@@ -13,7 +13,7 @@ import IacEditorDrawer from '@/components/iac/IacEditorDrawer';
 import { useSimulationStore } from '@/store/simulationStore';
 import { useArchitectureStore } from '@/store/architectureStore';
 import { SCENARIO_LIBRARY } from '@/templates/scenarios';
-import { THREE_TIER_STARTER } from '@/iac/starters';
+import { fromTopology, toYaml } from '@/iac/fromTopology';
 
 export default function SimulatorPage() {
   const { theme, toggleTheme } = useTheme();
@@ -26,9 +26,39 @@ export default function SimulatorPage() {
   const activeScenario   = SCENARIO_LIBRARY.find((s) => s.id === activeScenarioId) ?? null;
   const [docsOpen, setDocsOpen] = useState(false);
 
-  // IaC editor state — lifted so the YAML text survives open/close cycles
-  const [iacOpen, setIacOpen]   = useState(false);
-  const [iacYaml, setIacYaml]   = useState(THREE_TIER_STARTER);
+  // IaC editor open/close state
+  const [iacOpen, setIacOpen] = useState(false);
+
+  // IaC YAML lives in the store so it persists across open/close and is scoped
+  // to the currently loaded architecture.
+  const nodes       = useArchitectureStore((s) => s.nodes);
+  const edges       = useArchitectureStore((s) => s.edges);
+  const nodeConfigs = useArchitectureStore((s) => s.nodeConfigs);
+  const edgeConfigs = useArchitectureStore((s) => s.edgeConfigs);
+  const iacYaml     = useArchitectureStore((s) => s.iacYaml);
+  const setIacYaml  = useArchitectureStore((s) => s.setIacYaml);
+
+  // Canvas → IaC auto-sync (debounced 300 ms to absorb rapid drag events).
+  // Runs on every topology change and regenerates the full YAML with all
+  // fields, including default-valued and previously untouched ones.
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      if (nodes.length === 0 && edges.length === 0) {
+        setIacYaml('');
+        return;
+      }
+      const doc = fromTopology(
+        { nodes, edges, nodeConfigs, edgeConfigs },
+        { name: 'current-topology', includeDefaults: true },
+      );
+      setIacYaml(toYaml(doc));
+    }, 300);
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+  }, [nodes, edges, nodeConfigs, edgeConfigs, setIacYaml]);
 
   return (
     <ReactFlowProvider>

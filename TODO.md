@@ -1,6 +1,6 @@
 ﻿# TODO - System Design Simulator
 
-Last refreshed: April 5, 2026
+Last refreshed: April 6, 2026
 
 This file reflects the current codebase state and active delivery plan.
 **Current priority is Phase 2: Terraform-like YAML infrastructure authoring.**
@@ -19,16 +19,17 @@ Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulato
 - [x] Add schema and semantic validation for duplicate IDs, unknown resource types, invalid placements, and broken connections.
 - [x] Convert validated YAML into simulator `nodes`, `edges`, `nodeConfigs`, and `edgeConfigs`.
 - [x] Add a safe `Apply YAML` flow that only updates the stores and canvas when validation passes.
-- [ ] Auto-generate simulator IaC whenever a topology is created or edited through drag-and-drop on the canvas.
+- [x] Auto-generate simulator IaC whenever a topology is created or edited through drag-and-drop on the canvas.
 - [ ] Add IaC coverage for all existing architecture templates and shipped starter architectures.
-- [ ] Ensure a brand-new screen starts with both the canvas and the IaC editor empty.
-- [ ] Keep the canvas and IaC in full two-way sync at all times, regardless of whether edits start in the editor or on the canvas.
-- [ ] Make auto-generated IaC capture the complete node state, including default-valued and previously untouched fields.
-- [ ] Scope IaC state per architecture so opening a different architecture/file only shows its own corresponding IaC.
+- [x] Ensure a brand-new screen starts with both the canvas and the IaC editor empty.
+- [x] Keep the canvas and IaC in full two-way sync at all times, regardless of whether edits start in the editor or on the canvas.
+- [x] Make auto-generated IaC capture the complete node state, including default-valued and previously untouched fields.
+- [x] Scope IaC state per architecture so opening a different architecture/file only shows its own corresponding IaC.
 
 ### P1 - Authoring Experience
 
 - [x] Build a YAML editor panel/drawer with starter template, `Validate`, `Apply`, and `Reset` actions.
+- [x] Make the `STARTER` action load the template into the editor without mutating the canvas until `Apply` is clicked.
 - [x] Auto-layout imported topologies so the first render is readable and usable.
 - [x] Export the current canvas back to YAML with stable IDs and consistent field ordering.
 - [x] Add example templates for `three-tier`, `multi-az`, and `event-driven` architectures.

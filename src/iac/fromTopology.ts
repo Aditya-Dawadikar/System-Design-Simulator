@@ -38,6 +38,14 @@ export interface ExportMeta {
   description?: string;
   peakRps?: number;
   trafficPattern?: string;
+  /**
+   * When true, every non-internal NodeConfig field is emitted regardless of
+   * whether its value equals the component default. Use this for the live
+   * canvas→IaC auto-sync so the editor shows the complete node state.
+   * When false (default), fields equal to their default are omitted for a
+   * clean, minimal user export.
+   */
+  includeDefaults?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +57,7 @@ export interface ExportMeta {
  */
 export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDocument {
   const { nodes, edges, nodeConfigs, edgeConfigs } = input;
+  const includeDefaults = meta.includeDefaults ?? false;
 
   // --- Index nodes by id and type ---
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
@@ -102,12 +111,17 @@ export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDo
     const placement = buildPlacement(cfg, def?.scope);
 
     // Spec vs deploy split
-    const { spec, deploy } = splitConfig(type, cfg, def?.defaults ?? {});
+    const { spec, deploy } = splitConfig(type, cfg, def?.defaults ?? {}, includeDefaults);
+
+    // Label: always include when emitting defaults; otherwise only when customised
+    const resourceLabel = includeDefaults
+      ? cfg.label
+      : (cfg.label !== (def?.label ?? rNode.id) ? cfg.label : undefined);
 
     const resource: IacResource = {
       id: rNode.id,
       type: type as IacResource['type'],
-      label: cfg.label !== (def?.label ?? rNode.id) ? cfg.label : undefined,
+      label: resourceLabel,
     };
 
     if (placement) resource.placement = placement;
@@ -209,16 +223,20 @@ function splitConfig(
   type: string,
   cfg: NodeConfig,
   defaults: NodeConfig,
+  includeDefaults: boolean,
 ): { spec?: Record<string, unknown>; deploy?: IacDeploy } {
   const spec: Record<string, unknown> = {};
   const deployBase: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(cfg)) {
     if (SKIP_FIELDS.has(key)) continue;
+    if (value === undefined) continue;
 
-    // Skip if value equals the component default
-    const defVal = (defaults as Record<string, unknown>)[key];
-    if (defVal !== undefined && defVal === value) continue;
+    // Skip if value equals the component default (only for clean user exports)
+    if (!includeDefaults) {
+      const defVal = (defaults as Record<string, unknown>)[key];
+      if (defVal !== undefined && defVal === value) continue;
+    }
 
     if (DEPLOY_FIELDS.has(key)) {
       deployBase[key] = value;

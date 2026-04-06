@@ -16,7 +16,8 @@
       "Bash(node -e \"require\\('@types/js-yaml'\\); console.log\\('types ok'\\)\")",
       "Bash(npm install:*)",
       "Bash(node -e \"const z = require\\('zod'\\); const pkg = require\\('./node_modules/zod/package.json'\\); console.log\\('exports:', Object.keys\\(pkg.exports || {}\\).slice\\(0,5\\)\\); console.log\\('version:', pkg.version\\)\")",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }

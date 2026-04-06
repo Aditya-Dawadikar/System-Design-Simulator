@@ -13,6 +13,8 @@ interface ArchitectureStore {
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   activeScenarioId: string | null;
+  /** Current IaC YAML — kept in sync with the canvas via the simulator page. */
+  iacYaml: string;
 
   addNode: (type: ComponentType, position: XYPosition) => string;
   removeNode: (id: string) => void;
@@ -24,6 +26,7 @@ interface ArchitectureStore {
   updateEdgeConfig: (id: string, config: Partial<EdgeConfig>) => void;
   setSelectedNode: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
+  setIacYaml: (yaml: string) => void;
   loadTemplate: (template: ArchitectureTemplate, scenarioId?: string) => void;
   /** Apply a topology from the IaC pipeline without touching activeScenarioId. */
   loadTopology: (template: ArchitectureTemplate) => void;
@@ -44,6 +47,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
       selectedNodeId: null,
       selectedEdgeId: null,
       activeScenarioId: null,
+      iacYaml: '',
 
       addNode: (type, position) => {
         const def = COMPONENT_BY_TYPE[type];
@@ -120,6 +124,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
 
       setSelectedNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
       setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
+      setIacYaml: (yaml) => set({ iacYaml: yaml }),
 
       loadTemplate: (template, scenarioId) => {
         set({
@@ -130,6 +135,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
           selectedNodeId: null,
           selectedEdgeId: null,
           activeScenarioId: scenarioId,
+          iacYaml: '',  // cleared; auto-sync will regenerate from the new topology
         });
       },
 
@@ -141,6 +147,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
           edgeConfigs: template.edgeConfigs,
           selectedNodeId: null,
           selectedEdgeId: null,
+          iacYaml: '',  // cleared; auto-sync will regenerate
         });
       },
 
@@ -170,6 +177,7 @@ export const useArchitectureStore = create<ArchitectureStore>()(
         edges: s.edges,
         nodeConfigs: s.nodeConfigs,
         edgeConfigs: s.edgeConfigs,
+        iacYaml: s.iacYaml,
       }),
     }
   )

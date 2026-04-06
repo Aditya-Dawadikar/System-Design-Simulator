@@ -97,9 +97,10 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
     setStatus('idle');
   }
 
-  function handleReset() {
+  function handleLoadStarter() {
+    // Puts the starter template in the editor for the user to review/edit.
+    // The canvas is left unchanged; click APPLY to load the template.
     onYamlChange(THREE_TIER_STARTER);
-    loadTopology({ nodes: [], edges: [], nodeConfigs: {}, edgeConfigs: {} });
     setIssues([]);
     setStatus('idle');
   }
@@ -196,9 +197,9 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
         >
           <ToolbarButton
             label="STARTER"
-            onClick={handleReset}
+            onClick={handleLoadStarter}
             color="var(--text-dim)"
-            title="Reset to three-tier starter template"
+            title="Load three-tier starter template into editor (click APPLY to apply)"
           />
 
           <div style={{ width: 1, height: 18, background: 'var(--border)' }} />
