@@ -58,9 +58,13 @@ src/
 │   │   ├── EdgeWire.tsx            # Custom 'wire' edge
 │   │   └── nodes/                  # One file per ComponentType
 │   ├── inspector/
-│   │   ├── Inspector.tsx           # Right-panel config inspector; scope-aware NodeLocationField
+│   │   ├── Inspector.tsx           # Right-panel config inspector; scope-aware NodeLocationField;
+│   │   │                           #   NodeHeader shows service group badge + replica count;
+│   │   │                           #   ServicePropagationNotice between location and type fields
 │   │   ├── fields/EdgeInspector.tsx
 │   │   └── fields/                 # Per-type config field components (+ RegionFields, AvailabilityZoneFields)
+│   ├── iac/
+│   │   └── IacEditorDrawer.tsx     # YAML editor drawer — Validate/Apply/Export/Starter toolbar
 │   ├── shared/                     # ArcGauge, Sparkline, StatCell, Badge, NodeLocationBadge, etc.
 │   └── simulation/
 │       ├── MetricsDashboard.tsx    # Bottom panel: global stats, latency chart, node cards
@@ -74,24 +78,31 @@ src/
 ├── simulation/
 │   └── SimulationEngine.ts         # Pure TS tick engine (no React)
 ├── store/
-│   ├── architectureStore.ts        # Zustand — canvas state, persisted to localStorage
+│   ├── architectureStore.ts        # Zustand — canvas state + serviceGroups, persisted to localStorage
 │   └── simulationStore.ts          # Zustand — ephemeral simulation state + tick loop
 ├── iac/
 │   ├── schema.ts                   # TypeScript types + Zod schema for the YAML DSL
 │   ├── parser.ts                   # YAML text → parsed JS object with error handling
-│   ├── validate.ts                 # Semantic validation (duplicate IDs, bad refs, placement)
+│   ├── validate.ts                 # Semantic validation (duplicate IDs, bad refs, placement, service rules)
 │   ├── normalize.ts                # Fill defaults, resolve derived values, stable IDs
-│   ├── toTopology.ts               # Validated YAML model → nodes/edges/nodeConfigs/edgeConfigs
-│   ├── fromTopology.ts             # Current canvas state → YAML model (export)
-│   ├── starters.ts                 # Embedded YAML template strings (THREE_TIER_STARTER, etc.)
+│   ├── toTopology.ts               # Validated YAML model → nodes/edges/nodeConfigs/edgeConfigs/serviceGroups
+│   ├── fromTopology.ts             # Current canvas state → YAML model (export); reconstructs services[]+deployments[]
+│   ├── starters.ts                 # THREE_TIER_STARTER, SERVICE_DEPLOYMENT_STARTER,
+│   │                               #   SERVICE_DEPLOYMENT_ACTIVE_ACTIVE_STARTER
 │   └── examples/
 │       ├── three-tier.yaml         # Classic CDN → LB → App → DB
 │       ├── multi-az.yaml           # Multi-AZ with zone failover
-│       └── event-driven.yaml       # Queue-heavy async architecture
+│       ├── event-driven.yaml       # Queue-heavy async architecture
+│       └── multi-service.yaml      # K8s-style services[] + deployments[] checkout platform
 ├── templates/
 │   ├── defaultTemplate.ts          # Pre-built starter architecture
 │   ├── architectures.ts            # Architecture library
 │   └── scenarios.ts                # Scenario definitions
+├── tests/
+│   └── features/
+│       └── iac/
+│           ├── canvas-iac-sync.test.ts       # Round-trip / export tests
+│           └── service-deployment.test.ts    # 75 tests: toTopology, fromTopology, propagation, validation
 └── types/
     └── index.ts                    # All shared TypeScript types
 ```
@@ -102,7 +113,7 @@ src/
 
 | Store | Persistence | Responsibility |
 |-------|-------------|----------------|
-| `architectureStore` | localStorage | nodes, edges, nodeConfigs, edgeConfigs |
+| `architectureStore` | localStorage | nodes, edges, nodeConfigs, edgeConfigs, **serviceGroups** |
 | `simulationStore` | ephemeral | running/tick/metrics/events/history/latencyHistory; 500 ms tick loop |
 
 ### simulationStore fields
@@ -110,6 +121,30 @@ src/
 - `history: Record<string, number[]>` — last 40 `rpsIn` values per node (predictive autoscaling)
 - `latencyHistory: Record<string, number[]>` — last 40 `latencyMs` values per node (percentile chart)
 - `events: LogEvent[]` — last 100 log events
+
+### architectureStore — serviceGroups
+
+```ts
+interface ServiceGroup {
+  id: string              // same as the service id in YAML
+  type: ComponentType     // shared component type for all member nodes
+  label: string           // display label
+  nodeIds: string[]       // all node IDs that belong to this service
+  healingEnabled?: boolean
+}
+
+serviceGroups: Record<string, ServiceGroup>   // keyed by group id
+```
+
+**Config propagation**: When `updateNodeConfig(id, config)` is called for a node that belongs to a service group, all non-placement fields are propagated to every sibling node in the group automatically.
+
+```ts
+const PROPAGATION_SKIP = new Set<keyof NodeConfig>([
+  'zoneId', 'regionId', 'dbRole', 'primaryNodeId'
+])
+```
+
+Fields in `PROPAGATION_SKIP` are node-specific and are never propagated. All other config fields are propagated to siblings. This means changing `rpsPerInstance`, `instances`, autoscaling settings, etc. on one node will synchronize those changes to all other instances of the same service.
 
 ---
 
@@ -638,11 +673,6 @@ global error rate = min(1, Σ(rpsIn × errorRate) over all processing nodes)
 
 Each failed request is counted once at the node where it fails. Pass-through nodes (CDN, LB, API GW) with `errorRate=0` contribute 0. Falls back to simple weighted average when no source nodes exist.
 
-**Examples:**
-- All app servers down, CDN alive (30% cache hit): `700/1000 = 70%`
-- All app servers down, no CDN: `1000/1000 = 100%`
-- DB down, app server healthy: `1000/1000 = 100%`
-
 ---
 
 ## Traffic patterns
@@ -765,55 +795,54 @@ Core workflow:
 4. `Apply` replaces the canvas atomically (only on success)
 5. The simulation runs immediately against the imported topology
 6. `Export` writes the current canvas back to clean, diff-friendly YAML
+7. The canvas auto-syncs to the YAML editor (debounced 300 ms) whenever the canvas changes
 
 ### YAML DSL shape (v1)
 
+Two authoring styles are supported. They can be combined in one document.
+
+**Classic style** — flat `resources[]` with explicit per-zone node IDs:
+```yaml
+version: 1
+name: three-tier-app
+globals:
+  peakRps: 1500
+  trafficPattern: steady
+regions:
+  - id: us-east-1
+    zones:
+      - id: use1a
+resources:
+  - id: lb
+    type: load_balancer
+    placement:
+      region: us-east-1
+    spec:
+      algorithm: round_robin
+  - id: app-a
+    type: app_server
+    placement:
+      zone: use1a
+    deploy:
+      instances: 4
+      rpsPerInstance: 500
+connections:
+  - from: lb
+    to: app-a
+    protocol: REST
+```
+
+**K8s-style** — `services[]` + `deployments[]` (generates node IDs automatically):
 ```yaml
 version: 1
 name: checkout-platform
-description: Multi-AZ API with cache and database
-
-globals:
-  peakRps: 4500
-  trafficPattern: ramp          # steady | ramp | spike | wave | chaos
-
-regions:
-  - id: us-east-1
-    label: us-east-1
-    zones:
-      - id: use1a
-        label: us-east-1a
-      - id: use1b
-        label: us-east-1b
-
-resources:
-  - id: edge
-    type: cdn
-    label: Global CDN
-    placement:
-      scope: global             # global | region | zone
-    spec:
-      pops: 4
-      cacheablePct: 70
-
-  - id: api-lb
-    type: load_balancer
-    label: Public API LB
-    placement:
-      region: us-east-1         # maps to nodeConfig.regionId
-    spec:
-      algorithm: least_conn
-
-  - id: api-a
+services:
+  - id: api
     type: app_server
-    label: API Server A
-    placement:
-      zone: use1a               # maps to nodeConfig.zoneId
+    label: Checkout API
     deploy:
       instances: 3
-      cpuCores: 4
-      ramGb: 8
-      rpsPerInstance: 600
+      rpsPerInstance: 650
       autoscaling:
         enabled: true
         strategy: target_tracking
@@ -821,27 +850,34 @@ resources:
         maxInstances: 10
         targetMetric: load
         targetValue: 70
-
-connections:
-  - from: edge
-    to: api-lb
-    protocol: REST
-    timeoutMs: 3000
-  - from: api-lb
-    to: api-a
-    splitPct: 50
-
-scenarios:
-  - type: fail_zone
-    target: use1a
-    enabled: false
+    dependencies:
+      - service: session-cache
+      - service: orders-db
+        readSplitPct: 80
+        writeSplitPct: 20
+  - id: orders-db
+    type: database
+    spec:
+      engine: PostgreSQL
+      storageGb: 250
+deployments:
+  - service: api
+    zones:
+      - use1a
+      - use1b
+  - service: orders-db
+    zones:
+      - use1a          # becomes primary
+    replicas:
+      - zone: use1b    # becomes replica linked to primary
 ```
 
 ### YAML → simulator mapping
 
 | YAML concept | Maps to |
 |---|---|
-| `resources[]` | React Flow `nodes[]` |
+| `resources[]` | React Flow `nodes[]` (explicit IDs) |
+| `services[]` + `deployments[]` | Expanded to multiple nodes; IDs follow `{serviceId}-{zoneId}` or `{serviceId}-{regionId}` |
 | `connections[]` | React Flow `edges[]` |
 | `regions[].id` | node ID for the `region` node; also used for `regionId` lookups |
 | `regions[].zones[].id` | node ID for the `availability_zone` node; used for `zoneId` lookups |
@@ -851,11 +887,13 @@ scenarios:
 | `spec.*` | flat `nodeConfigs[nodeId]` fields |
 | `deploy.*` | flat `nodeConfigs[nodeId]` fields (`instances`, `cpuCores`, etc.) |
 | `deploy.autoscaling.*` | `autoscalingEnabled`, `autoscalingStrategy`, `minInstances`, … |
-| `connections[].protocol` | `edgeConfigs[edgeId].protocol` |
-| `connections[].timeoutMs` | `edgeConfigs[edgeId].timeoutMs` |
-| `connections[].splitPct` | `edgeConfigs[edgeId].splitPct` |
+| `dependencies[].service` | inferred edges between service nodes |
+| `dependencies[].readSplitPct` / `writeSplitPct` | `edgeConfigs[edgeId].readSplitPct` / `writeSplitPct` |
+| `deployments[].zones[]` | one node per zone (first = primary for `database`) |
+| `deployments[].replicas[]` | replica nodes with `dbRole: 'replica'` + `primaryNodeId` |
 | `globals.peakRps` | simulation control default RPS |
 | `globals.trafficPattern` | simulation pattern default |
+| Expanded service nodes | recorded in `serviceGroups` for config propagation |
 
 ### Compiler pipeline (`src/iac/`)
 
@@ -864,14 +902,45 @@ YAML text
   → parser.ts        parse YAML, surface line/path on syntax errors
   → validate.ts      semantic checks (see rules below)
   → normalize.ts     fill defaults, generate stable node IDs
-  → toTopology.ts    produce { nodes, edges, nodeConfigs, edgeConfigs }
-  → store apply      architectureStore.setTopology() — atomic, only on success
+  → toTopology.ts    produce { nodes, edges, nodeConfigs, edgeConfigs, serviceGroups }
+  → store apply      architectureStore.loadTopology() — atomic, only on success
   → canvas render    React Flow picks up the new nodes/edges
 ```
 
 Export path: `fromTopology.ts` reads current store state → produces clean YAML model → serialized to string.
 
 All pipeline modules are **pure functions** — no React imports, no store imports. Testable in isolation.
+
+### Service/Deployment abstraction — `toTopology.ts`
+
+When `services[]` + `deployments[]` are present, `toTopology` expands them:
+
+1. For each deployment entry, look up the service definition.
+2. For each zone in `deployment.zones[]`, create one node with ID `{serviceId}-{zoneId}`, type = service type, `nodeConfig.zoneId = zoneId` (or `regionId` for regional services).
+3. For database services, the first zone entry becomes `dbRole: 'primary'`; each `replicas[]` entry becomes `dbRole: 'replica'` with `primaryNodeId` pointing to the primary node.
+4. All expanded nodes for the same service are recorded in a `ServiceGroup` under the service ID.
+5. `dependencies[]` in a service definition generate edges between the expanded nodes of the source service and each node of the target service. `readSplitPct`/`writeSplitPct` are applied to those edges.
+
+### Service/Deployment abstraction — `fromTopology.ts`
+
+`fromTopology` accepts `{ nodes, edges, nodeConfigs, edgeConfigs, serviceGroups }`. When `serviceGroups` is non-empty:
+
+1. Build a `nodeToService` reverse map from `serviceGroups`.
+2. Exclude service-member nodes from `resources[]` — they will appear in `services[]` + `deployments[]` instead.
+3. For each service group, pick the canonical node (first non-replica). Pre-strip `dbRole`, `primaryNodeId`, `healingEnabled` from the config (these are encoded in the `deployments` structure, not the service spec). Reconstruct `spec` / `deploy` fields.
+4. Classify each node: `dbRole === 'replica'` → `deployment.replicas[]`; others → `deployment.zones[]` or `deployment.regions[]`.
+5. Infer `dependencies[]` from inter-service edges (one dependency entry per unique target service).
+6. Inter-service edges are excluded from `connections[]`.
+
+### Starter templates (`src/iac/starters.ts`)
+
+| Constant | Description |
+|---|---|
+| `THREE_TIER_STARTER` | Classic multi-AZ three-tier web app (classic resources[] style) |
+| `SERVICE_DEPLOYMENT_STARTER` | K8s-style checkout platform with services/deployments; 5 services across 2 AZs |
+| `SERVICE_DEPLOYMENT_ACTIVE_ACTIVE_STARTER` | Multi-region active-active; 6 services across us-east-1 + us-west-2 with CDN + Global Accelerator |
+
+IaC editor toolbar exposes: `STARTER` (THREE_TIER_STARTER) and `SVC+DEPLOY` (SERVICE_DEPLOYMENT_STARTER).
 
 ### Validation rules (minimum for v1)
 
@@ -891,55 +960,56 @@ Errors block apply. Warnings are advisory.
 | Invalid enum value (e.g. `algorithm`, `engine`, `trafficPattern`) | error |
 | Unsupported field for given resource type | warning |
 | Self-referencing connection (`from === to`) | error |
-
-Validation result shape:
-```ts
-interface ValidationIssue {
-  severity: 'error' | 'warning'
-  message: string
-  path?: string      // e.g. "resources[2].placement.zone"
-  line?: number
-}
-```
+| `deployments[].service` references unknown service ID | error |
+| `deployments[].zones[]` references undeclared zone ID | error |
+| `dependencies[].service` references unknown service ID | error |
 
 ### UI requirements
 
-- YAML editor in a drawer/panel (not a modal — needs to stay open alongside the canvas)
-- Toolbar: `Starter Template` | `Validate` | `Apply` | `Export` | `Reset`
-- Error list rendered below the editor; clicking an error highlights the relevant line
-- `Apply` is disabled while there are validation errors
-- `Apply` replaces the canvas atomically — partial mutation on invalid input is not allowed
-- Auto-layout nodes after import (dagre or simple grid) so the first render is immediately readable
+- YAML editor in a drawer (not modal — stays open alongside canvas)
+- Toolbar: `STARTER` | `SVC+DEPLOY` | `VALIDATE` | `APPLY` | `EXPORT`
+- Error list rendered below editor; `APPLY` disabled while there are validation errors
+- `APPLY` replaces canvas atomically — partial mutation on invalid input is not allowed
+- Canvas auto-syncs to YAML editor (debounced 300 ms) on every canvas change
+- `ServicePropagationNotice` rendered in Inspector between location and type-specific fields for nodes that belong to a service group
 
-### Node auto-layout after import
+### Inspector service group UI
 
-After `toTopology` produces nodes, apply a deterministic layout before writing to the store:
-- Region and AZ containers positioned first
-- Child nodes distributed inside their container
-- Nodes without placement stacked at the top in a grid
-- Do not overwrite positions on subsequent exports/re-imports if IDs are stable
+`NodeHeader` in `Inspector.tsx` shows a purple `⊕ {serviceId}` badge when the node belongs to a service group, plus a replica count badge and an optional `✦ healing` badge.
 
-### Export behavior
+`ServicePropagationNotice` renders a purple-bordered info box explaining that config changes will propagate to all sibling nodes. It appears between the location fields and type-specific fields, only for nodes in a service group.
 
-- `fromTopology.ts` must produce stable YAML when re-exported after a round-trip
-- Use the same `id` as the React Flow node ID where possible
-- Omit fields that are equal to their defaults (keeps YAML clean)
-- Field ordering: `id`, `type`, `label`, `placement`, `spec`/`deploy` (consistent per-resource)
-- Connection ordering follows topological sort (sources first)
-
-### Supported resource types for v1 YAML
-
-`traffic_generator`, `cdn`, `global_accelerator`, `load_balancer`, `api_gateway`, `app_server`, `cache`, `database`, `pubsub`, `cloud_function`, `worker_pool`, `cloud_storage`, `rate_limiter`, `service_mesh`, `nat_gateway`, `firewall`, `region`, `availability_zone`
-
-Prefer enabling existing simulator types in YAML rather than inventing parallel models.
+**Config propagation**: `architectureStore.updateNodeConfig` detects if the node belongs to a service group and propagates all non-`PROPAGATION_SKIP` fields to every sibling node automatically. This enables clicking any instance of a service and editing its spec to apply the change fleet-wide.
 
 ### IaC-specific gotchas
 
-- **Atomic apply only** — never partially mutate store state. Build the full topology object first, validate it, then call `setTopology` once.
+- **Atomic apply only** — never partially mutate store state. Build the full topology object first, validate it, then call `loadTopology` once.
 - **`regions` section auto-creates nodes** — declaring a region or zone in `regions[]` implicitly creates a `region` / `availability_zone` node. Do not also declare them again in `resources[]`.
-- **Placement ID resolution** — `placement.zone: use1a` maps to the node whose ID is `use1a`. The validator must confirm the zone exists in `regions`.
-- **`deploy` vs `spec`** — `deploy` is used for compute resources (`app_server`, `worker_pool`, `cloud_function`); `spec` for everything else. Both flatten into the same `NodeConfig` shape.
+- **Service node IDs follow `{serviceId}-{zoneId}`** — e.g. `api` deployed to `use1a` → node ID `api-use1a`. Connections in classic `connections[]` reference these generated IDs; `dependencies[]` reference service IDs (not node IDs).
+- **`deploy` vs `spec`** — `deploy` is for compute resources (`app_server`, `worker_pool`, `cloud_function`); `spec` for everything else. Both flatten into the same `NodeConfig`.
 - **Autoscaling sub-object** — `deploy.autoscaling.*` must be spread into flat `NodeConfig` fields (`autoscalingEnabled`, `autoscalingStrategy`, `minInstances`, etc.) in `toTopology.ts`.
-- **Export omits defaults** — `fromTopology.ts` should not emit fields whose value equals the `ComponentDefinition` default. Keeps exported YAML minimal and diff-friendly.
+- **`dbRole` / `primaryNodeId` not in global `SKIP_FIELDS`** — classic resources need these fields in `spec`; service group nodes have them stripped inside `buildServicesAndDeployments` before calling `splitConfig`. Do not add them to global `SKIP_FIELDS`.
+- **Export omits defaults** — `fromTopology.ts` does not emit fields whose value equals the `ComponentDefinition` default. Keeps exported YAML minimal and diff-friendly.
 - **Parser is decoupled from React** — `src/iac/` modules must not import from `src/components/`, `src/store/`, or `src/simulation/`. They accept plain data and return plain data.
-- **Round-trip stability** — importing a YAML file, exporting it, and re-importing must produce an identical topology. Test this explicitly.
+- **Round-trip stability** — importing a YAML file, exporting it, and re-importing must produce an identical topology. Covered by `canvas-iac-sync.test.ts`.
+- **Service groups persisted** — `serviceGroups` is included in `architectureStore`'s `partialize` slice and survives page refresh.
+- **`removeNode` cleans service groups** — when a node is deleted, `architectureStore.removeNode` removes it from any service group and removes the group if it becomes empty.
+- **`PROPAGATION_SKIP` is exhaustive** — only `zoneId`, `regionId`, `dbRole`, `primaryNodeId` are skipped. All other config keys (including all autoscaling fields) propagate to siblings.
+- **`serviceGroups` must be passed to `fromTopology`** — both the auto-sync in `simulator/page.tsx` and the `handleExport` in `IacEditorDrawer.tsx` must pass `serviceGroups` from the store, or service reconstruction will produce classic `resources[]` instead of `services[]` + `deployments[]`.
+
+### Test suite
+
+`tests/features/iac/service-deployment.test.ts` — 75 tests organized in 10 suites:
+
+| Suite | Tests | What it covers |
+|---|---|---|
+| toTopology — node IDs | 5 | Generated IDs follow `{serviceId}-{zoneId}` pattern |
+| toTopology — serviceGroups | 6 | Group membership, node count, type, label |
+| toTopology — nodeConfig | 8 | Shared fields propagated; zone-specific fields correct |
+| toTopology — db primary/replica | 6 | First zone = primary; replicas[] = replica + primaryNodeId |
+| toTopology — dependency edges | 4 | Edge creation, readSplitPct/writeSplitPct mapping |
+| fromTopology — reconstruction | 14 | services[]/deployments[] correctly rebuilt; classic resources unaffected |
+| config propagation | 8 | Pure `applyWithPropagation` mirrors store behavior; PROPAGATION_SKIP respected |
+| validateDocument — service rules | 5 | Unknown service ref, deployment without service, etc. |
+| validateDocument — deployment rules | 6 | Zone ref validation, region ref validation |
+| multi-service.yaml — end-to-end | 13 | Full parse→validate→toTopology→fromTopology round-trip |

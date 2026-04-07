@@ -23,7 +23,8 @@ An interactive web simulator for visualizing, designing, and stress-testing dist
 - **Metrics dashboard** — global stats, per-node ArcGauge load indicators, RPS sparklines, P99 latency, error rate, component detail rows, and a live latency percentile chart (p50/p75/p90/p95/p99) per selected node
 - **Event log** — timestamped info / warn / error / k8s events with auto-scroll
 - **Drag-and-drop canvas** — React Flow canvas with zoom, pan, duplicate, and delete; architecture persisted to localStorage
-- **IaC YAML editor** — declare entire topologies in a single YAML file; Validate/Apply/Export actions; structured parse and semantic error surfacing; starter template; round-trip stable export from any canvas state
+- **IaC YAML editor** — declare entire topologies in a single YAML file using either classic flat `resources[]` style or K8s-style `services[]` + `deployments[]` blocks; Validate/Apply/Export actions; structured parse and semantic error surfacing; two built-in starter templates; round-trip stable export from any canvas state; canvas auto-syncs to the editor on every change
+- **Service/Deployment abstraction** — define a logical service once in `services[]` and stamp it across multiple zones or regions via `deployments[]`; node IDs are generated automatically (`{serviceId}-{zoneId}`); database deployments support primary/replica topology out of the box; service `dependencies[]` auto-generate correctly typed edges with read/write split percentages; editing any instance of a service in the Inspector propagates config changes to all sibling instances automatically
 - **JSON import/export** — save and share architecture snapshots
 - **Architecture templates** — 11 pre-built scenarios including multi-AZ high availability, multi-region active-active with per-microservice traffic routing, and more
 
@@ -78,7 +79,8 @@ Test file convention: one test file per feature under `tests/features/`.
 7. **Run the simulation** using the controls at the bottom. Choose a peak RPS and a traffic pattern, then click Run.
 8. **Read metrics** in the dashboard below the canvas — global stats update every 500 ms; per-node cards show load, RPS, latency, and component-specific details.
 9. **Watch the event log** for overload events, recovery, autoscaling actions, health-check rerouting, and queue warnings.
-10. **Use the IaC YAML editor** — click the **IAC** button in the header to open the editor. Write or paste a topology YAML, click **VALIDATE** to see parse and semantic errors, then **APPLY** to replace the canvas atomically. **EXPORT** writes the current canvas back to YAML. **STARTER** resets the editor to the built-in three-tier template.
+10. **Use the IaC YAML editor** — click the **IAC** button in the header to open the editor. Write or paste a topology YAML, click **VALIDATE** to see parse and semantic errors, then **APPLY** to replace the canvas atomically. **EXPORT** writes the current canvas back to YAML. **STARTER** loads the built-in three-tier template; **SVC+DEPLOY** loads a K8s-style checkout platform using `services[]` + `deployments[]`. The editor auto-syncs whenever the canvas changes.
+11. **Edit services uniformly** — when using the K8s-style authoring, clicking any instance of a service (e.g. `api-use1a` or `api-use1b`) and changing its config in the Inspector automatically propagates those changes to all other instances of the same service. Placement-specific fields (zone, region, DB role) are excluded from propagation.
 
 ---
 

@@ -34,6 +34,8 @@ Phase 2 focus: **Terraform-like YAML infrastructure authoring** for the simulato
 - [x] Auto-layout imported topologies so the first render is readable and usable.
 - [x] Export the current canvas back to YAML with stable IDs and consistent field ordering.
 - [x] Add example templates for `three-tier`, `multi-az`, and `event-driven` architectures.
+- [ ] Add visual form-based builders for `services[]` and `deployments[]` so users can declare shared services and rollout policies without hand-writing YAML.
+- [ ] Add drag-and-drop replication controls so dropping a service can register the target regions and availability zones to fan out the same architecture automatically.
 
 ### P2 - Quality and Polish
 
