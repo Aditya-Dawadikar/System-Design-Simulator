@@ -210,6 +210,8 @@ export interface NodeConfig {
   taskDurationMs?: number;    // time a single thread takes per task (ms)
   // Comment / Annotation
   commentBody?: string;
+  // Service / Deployment (healing config stored per-node; actual recovery logic is future)
+  healingEnabled?: boolean;
   // Region / Availability Zone
   regionName?: string;
   zoneName?: string;
@@ -280,9 +282,27 @@ export interface LogEvent {
   nodeId?: string;
 }
 
+/**
+ * A logical service grouping: all canvas nodes that were created from the same
+ * `services[]` entry share this group.  Config changes to any member node are
+ * propagated to every other node in the group (excluding placement-specific
+ * fields such as zoneId / regionId / dbRole / primaryNodeId).
+ */
+export interface ServiceGroup {
+  id: string;
+  type: ComponentType;
+  label: string;
+  /** IDs of every canvas node that belongs to this service. */
+  nodeIds: string[];
+  /** When true the node spec was authored with healing enabled (stored for UI; future engine integration). */
+  healingEnabled?: boolean;
+}
+
 export interface ArchitectureTemplate {
   nodes: import('reactflow').Node[];
   edges: import('reactflow').Edge[];
   nodeConfigs: Record<string, NodeConfig>;
   edgeConfigs: Record<string, EdgeConfig>;
+  /** Service groups produced by the services+deployments IaC expansion. Optional — absent for resource-only topologies. */
+  serviceGroups?: Record<string, ServiceGroup>;
 }

@@ -222,6 +222,7 @@ function NodeLocationField({ nodeId, type }: { nodeId: string; type: ComponentTy
 function NodeHeader({ nodeId }: { nodeId: string }) {
   const config = useArchitectureStore((s) => s.nodeConfigs[nodeId]);
   const nodes = useArchitectureStore((s) => s.nodes);
+  const serviceGroups = useArchitectureStore((s) => s.serviceGroups);
   const node = nodes.find((n) => n.id === nodeId);
 
   if (!node) return null;
@@ -229,6 +230,9 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
   const type = node.type as ComponentType;
   const def = COMPONENT_BY_TYPE[type];
   const label = config?.label ?? def?.label ?? type;
+
+  // Check if this node belongs to a service group
+  const serviceGroup = Object.values(serviceGroups).find((g) => g.nodeIds.includes(nodeId));
 
   return (
     <div
@@ -282,6 +286,53 @@ function NodeHeader({ nodeId }: { nodeId: string }) {
       >
         {type.replace('_', ' ')}
       </span>
+
+      {serviceGroup && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '9px',
+              fontWeight: 600,
+              color: '#818cf8',
+              background: '#818cf818',
+              border: '1px solid #818cf830',
+              borderRadius: '3px',
+              padding: '2px 6px',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+          >
+            ⊕ {serviceGroup.id}
+          </span>
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '9px',
+              color: 'var(--text-dim)',
+            }}
+          >
+            {serviceGroup.nodeIds.length} replica{serviceGroup.nodeIds.length !== 1 ? 's' : ''}
+          </span>
+          {serviceGroup.healingEnabled && (
+            <span
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: '9px',
+                fontWeight: 600,
+                color: '#34d399',
+                background: '#34d39918',
+                border: '1px solid #34d39930',
+                borderRadius: '3px',
+                padding: '2px 6px',
+                letterSpacing: '0.08em',
+              }}
+            >
+              ✦ healing
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -342,6 +393,59 @@ function EdgeHeader({ edgeId }: { edgeId: string }) {
       >
         edge
       </span>
+    </div>
+  );
+}
+
+/**
+ * Banner shown inside the scrollable fields area when the selected node
+ * belongs to a service group. Informs the user that config changes are
+ * propagated to all replicas of the same service.
+ */
+function ServicePropagationNotice({ nodeId }: { nodeId: string }) {
+  const serviceGroups = useArchitectureStore((s) => s.serviceGroups);
+  const serviceGroup = Object.values(serviceGroups).find((g) => g.nodeIds.includes(nodeId));
+  if (!serviceGroup) return null;
+
+  const replicaCount = serviceGroup.nodeIds.length;
+
+  return (
+    <div
+      style={{
+        margin: '0 14px 14px',
+        padding: '8px 10px',
+        background: 'color-mix(in srgb, #818cf8 8%, transparent)',
+        border: '1px solid color-mix(in srgb, #818cf8 25%, transparent)',
+        borderRadius: '4px',
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '9px',
+          fontWeight: 700,
+          color: '#818cf8',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          marginBottom: '4px',
+        }}
+      >
+        ⊕ service · {serviceGroup.id}
+      </div>
+      <div
+        style={{
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: '9px',
+          color: 'var(--text-dim)',
+          lineHeight: 1.6,
+        }}
+      >
+        Changes here propagate to all{' '}
+        <span style={{ color: 'var(--text)', fontWeight: 700 }}>{replicaCount}</span>{' '}
+        replica{replicaCount !== 1 ? 's' : ''} automatically.
+        <br />
+        Placement fields (zone, region, role) stay per-replica.
+      </div>
     </div>
   );
 }
@@ -421,17 +525,21 @@ export default function Inspector() {
               flex: 1,
               minHeight: 0,
               overflowY: 'auto',
-              padding: '14px',
               scrollbarWidth: 'thin',
               scrollbarColor: 'var(--border) transparent',
             }}
           >
-            <NodeNameField
-              nodeId={selectedNodeId}
-              label={selectedNode.type === 'comment' ? 'Title' : 'Name'}
-            />
-            <NodeLocationField nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
-            <NodeFields nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
+            <div style={{ padding: '14px' }}>
+              <NodeNameField
+                nodeId={selectedNodeId}
+                label={selectedNode.type === 'comment' ? 'Title' : 'Name'}
+              />
+              <NodeLocationField nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
+            </div>
+            <ServicePropagationNotice nodeId={selectedNodeId} />
+            <div style={{ padding: '0 14px 14px' }}>
+              <NodeFields nodeId={selectedNodeId} type={selectedNode.type as ComponentType} />
+            </div>
           </div>
         </>
       )}

@@ -1,0 +1,179 @@
+version: 1
+name: multi-service-checkout
+description: >
+  K8s-style checkout platform using services + deployments.
+  Demonstrates multi-AZ app servers with autoscaling, a Redis cache,
+  a PostgreSQL primary/replica database, and an async worker pipeline.
+
+globals:
+  peakRps: 5000
+  trafficPattern: ramp
+
+regions:
+  - id: us-east-1
+    label: us-east-1
+    zones:
+      - id: use1a
+        label: us-east-1a
+      - id: use1b
+        label: us-east-1b
+      - id: use1c
+        label: us-east-1c
+
+# ── Classic infrastructure resources (shared, non-replicated) ────────────────
+resources:
+  - id: tgen
+    type: traffic_generator
+    label: Load Generator
+    spec:
+      generatorRps: 5000
+      generatorPattern: ramp
+      readRatioPct: 70
+
+  - id: cdn
+    type: cdn
+    label: Global CDN
+    spec:
+      pops: 4
+      cacheablePct: 55
+
+  - id: api-lb
+    type: load_balancer
+    label: API Load Balancer
+    placement:
+      region: us-east-1
+    spec:
+      algorithm: least_conn
+      healthChecks: true
+
+# ── Services (logical component definitions) ─────────────────────────────────
+services:
+  - id: api
+    type: app_server
+    label: API Server
+    deploy:
+      instances: 3
+      cpuCores: 4
+      ramGb: 8
+      rpsPerInstance: 600
+      avgLatencyMs: 30
+      workloadType: io_bound
+      autoscaling:
+        enabled: true
+        strategy: target_tracking
+        minInstances: 2
+        maxInstances: 12
+        targetMetric: load
+        targetValue: 70
+        ttScaleOutCooldownTicks: 4
+        ttScaleInCooldownTicks: 24
+    dependencies:
+      - service: session-cache
+      - service: checkout-db
+        readSplitPct: 80
+        writeSplitPct: 20
+    healing:
+      enabled: true
+      restartPolicy: always
+
+  - id: session-cache
+    type: cache
+    label: Session Cache
+    spec:
+      memoryGb: 16
+      ttlSeconds: 900
+      evictionPolicy: lru
+      clusterMode: true
+
+  - id: checkout-db
+    type: database
+    label: Checkout DB
+    spec:
+      engine: PostgreSQL
+      storageGb: 500
+      shards: 1
+      rpsPerShard: 1200
+    healing:
+      enabled: true
+      restartPolicy: on-failure
+
+  - id: order-worker
+    type: worker_pool
+    label: Order Worker
+    deploy:
+      workerCount: 8
+      threadCount: 4
+      taskDurationMs: 200
+    dependencies:
+      - service: checkout-db
+        writeSplitPct: 100
+
+  - id: order-queue
+    type: pubsub
+    label: Order Queue
+    spec:
+      partitions: 8
+      messageRetentionHours: 48
+      maxMessageSizeKb: 64
+
+# ── Deployments (where each service runs) ────────────────────────────────────
+deployments:
+  # API servers in all three AZs (autoscaling active)
+  - service: api
+    zones:
+      - use1a
+      - use1b
+      - use1c
+
+  # Cache in two AZs for redundancy
+  - service: session-cache
+    zones:
+      - use1a
+      - use1b
+
+  # Database: primary in use1a, replicas in use1b and use1c
+  - service: checkout-db
+    zones:
+      - use1a
+    replicas:
+      - zone: use1b
+      - zone: use1c
+
+  # Workers in two AZs
+  - service: order-worker
+    zones:
+      - use1a
+      - use1b
+
+  # Pub/Sub is regional (spans AZs automatically)
+  - service: order-queue
+    regions:
+      - us-east-1
+
+# ── Connections (classic resources → service nodes) ──────────────────────────
+connections:
+  - from: tgen
+    to: cdn
+  - from: cdn
+    to: api-lb
+  - from: api-lb
+    to: api-use1a
+    splitPct: 34
+  - from: api-lb
+    to: api-use1b
+    splitPct: 33
+  - from: api-lb
+    to: api-use1c
+    splitPct: 33
+  - from: api-use1a
+    to: order-queue-us-east-1
+  - from: api-use1b
+    to: order-queue-us-east-1
+  - from: api-use1c
+    to: order-queue-us-east-1
+  - from: order-queue-us-east-1
+    to: order-worker-use1a
+    splitPct: 50
+  - from: order-queue-us-east-1
+    to: order-worker-use1b
+    splitPct: 50

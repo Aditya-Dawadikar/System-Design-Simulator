@@ -8,18 +8,20 @@
  *   - Fields equal to their ComponentDefinition default are omitted
  *   - The autoscaling block is reconstructed from flat NodeConfig fields
  *   - Region and AZ nodes are extracted into the regions[] section
+ *   - When serviceGroups is provided, services[] + deployments[] are reconstructed
  *
  * Pure module — no React imports, no store imports.
  */
 
 import yaml from 'js-yaml';
 import type { Node, Edge } from 'reactflow';
-import type { NodeConfig, EdgeConfig } from '@/types';
+import type { NodeConfig, EdgeConfig, ServiceGroup } from '@/types';
 import { COMPONENT_BY_TYPE, DEFAULT_EDGE_CONFIG } from '@/constants/components';
 import { CONTAINER_COMPONENT_TYPES } from './schema';
 import type {
   IacDocument, IacResource, IacRegion, IacZone,
   IacConnection, IacDeploy, IacAutoscaling,
+  IacService, IacDeployment, IacServiceDependency,
 } from './schema';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +33,8 @@ export interface TopologyInput {
   edges: Edge[];
   nodeConfigs: Record<string, NodeConfig>;
   edgeConfigs: Record<string, EdgeConfig>;
+  /** When present, services[] + deployments[] are reconstructed on export. */
+  serviceGroups?: Record<string, ServiceGroup>;
 }
 
 export interface ExportMeta {
@@ -57,16 +61,26 @@ export interface ExportMeta {
  */
 export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDocument {
   const { nodes, edges, nodeConfigs, edgeConfigs } = input;
+  const serviceGroups = input.serviceGroups ?? {};
   const includeDefaults = meta.includeDefaults ?? false;
+  const hasServices = Object.keys(serviceGroups).length > 0;
 
   // --- Index nodes by id and type ---
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // Build set of all service-group node IDs so they are excluded from resources[]
+  const serviceNodeIds = new Set<string>();
+  for (const group of Object.values(serviceGroups)) {
+    for (const nodeId of group.nodeIds) {
+      serviceNodeIds.add(nodeId);
+    }
+  }
 
   // --- Extract region nodes ---
   const regionNodes = nodes.filter((n) => n.type === 'region');
   const zoneNodes = nodes.filter((n) => n.type === 'availability_zone');
   const resourceNodes = nodes.filter(
-    (n) => n.type && !CONTAINER_COMPONENT_TYPES.has(n.type),
+    (n) => n.type && !CONTAINER_COMPONENT_TYPES.has(n.type) && !serviceNodeIds.has(n.id),
   );
 
   // Build region→zone map
@@ -101,7 +115,7 @@ export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDo
     };
   });
 
-  // --- Build resources[] ---
+  // --- Build resources[] (classic non-service nodes) ---
   const resources: IacResource[] = resourceNodes.map((rNode) => {
     const type = rNode.type!;
     const cfg = nodeConfigs[rNode.id] ?? {};
@@ -134,10 +148,24 @@ export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDo
   // --- Build connections[] ---
   const connections: IacConnection[] = edges
     .filter((e) => nodeById.has(e.source) && nodeById.has(e.target))
+    // Exclude inter-service edges (they appear in services[].dependencies instead)
+    .filter((e) => !(serviceNodeIds.has(e.source) && serviceNodeIds.has(e.target)))
     .map((e) => {
       const eCfg = edgeConfigs[e.id] ?? DEFAULT_EDGE_CONFIG;
       return buildConnection(e.source, e.target, eCfg);
     });
+
+  // --- Build services[] + deployments[] ---
+  let services: IacService[] | undefined;
+  let deployments: IacDeployment[] | undefined;
+
+  if (hasServices) {
+    const result = buildServicesAndDeployments(
+      serviceGroups, nodes, edges, nodeConfigs, edgeConfigs, includeDefaults,
+    );
+    services = result.services.length > 0 ? result.services : undefined;
+    deployments = result.deployments.length > 0 ? result.deployments : undefined;
+  }
 
   // --- Assemble document ---
   const doc: IacDocument = {
@@ -155,6 +183,8 @@ export function fromTopology(input: TopologyInput, meta: ExportMeta = {}): IacDo
     ...(regions.length > 0 ? { regions } : {}),
     resources,
     ...(connections.length > 0 ? { connections } : {}),
+    ...(services ? { services } : {}),
+    ...(deployments ? { deployments } : {}),
   };
 
   return doc;
@@ -170,6 +200,126 @@ export function toYaml(doc: IacDocument): string {
     lineWidth: 120,
     // Preserve insertion order (default for yaml.dump)
   });
+}
+
+// ---------------------------------------------------------------------------
+// Service reconstruction
+// ---------------------------------------------------------------------------
+
+function buildServicesAndDeployments(
+  serviceGroups: Record<string, ServiceGroup>,
+  nodes: Node[],
+  edges: Edge[],
+  nodeConfigs: Record<string, NodeConfig>,
+  edgeConfigs: Record<string, EdgeConfig>,
+  includeDefaults: boolean,
+): { services: IacService[]; deployments: IacDeployment[] } {
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // Build reverse map: nodeId → serviceId
+  const nodeToService = new Map<string, string>();
+  for (const [serviceId, group] of Object.entries(serviceGroups)) {
+    for (const nodeId of group.nodeIds) {
+      nodeToService.set(nodeId, serviceId);
+    }
+  }
+
+  const services: IacService[] = [];
+  const deployments: IacDeployment[] = [];
+
+  for (const [serviceId, group] of Object.entries(serviceGroups)) {
+    if (group.nodeIds.length === 0) continue;
+
+    const type = group.type;
+    const def = COMPONENT_BY_TYPE[type as keyof typeof COMPONENT_BY_TYPE];
+
+    // Use the primary / first non-replica node as the canonical config source
+    const canonicalNodeId = group.nodeIds.find((id) => {
+      const cfg = nodeConfigs[id] ?? {};
+      return cfg.dbRole !== 'replica';
+    }) ?? group.nodeIds[0];
+
+    const canonicalNode = nodeById.get(canonicalNodeId);
+    if (!canonicalNode) continue;
+
+    const cfg = nodeConfigs[canonicalNodeId] ?? {};
+
+    // Strip placement-specific and role/healing fields — these are encoded in
+    // the deployment structure or the healing block instead.
+    const baseCfg: NodeConfig = { ...cfg };
+    (baseCfg as Record<string, unknown>).dbRole = undefined;
+    (baseCfg as Record<string, unknown>).primaryNodeId = undefined;
+    (baseCfg as Record<string, unknown>).healingEnabled = undefined;
+    // zoneId, regionId, label, etc. are already stripped by SKIP_FIELDS in splitConfig
+
+    const { spec, deploy } = splitConfig(type as string, baseCfg, def?.defaults ?? {}, includeDefaults);
+
+    // Build dependencies: look at edges from any node in this group to nodes
+    // belonging to other service groups.
+    const depMap = new Map<string, IacServiceDependency>();
+    for (const nodeId of group.nodeIds) {
+      for (const edge of edges) {
+        if (edge.source !== nodeId) continue;
+        const targetServiceId = nodeToService.get(edge.target);
+        if (!targetServiceId || targetServiceId === serviceId || depMap.has(targetServiceId)) continue;
+
+        const eCfg = edgeConfigs[edge.id];
+        const dep: IacServiceDependency = { service: targetServiceId };
+        if (eCfg?.protocol && eCfg.protocol !== DEFAULT_EDGE_CONFIG.protocol) {
+          dep.protocol = eCfg.protocol;
+        }
+        if (eCfg?.splitPct !== undefined) dep.splitPct = eCfg.splitPct;
+        if (eCfg?.readSplitPct !== undefined) dep.readSplitPct = eCfg.readSplitPct;
+        if (eCfg?.writeSplitPct !== undefined) dep.writeSplitPct = eCfg.writeSplitPct;
+        depMap.set(targetServiceId, dep);
+      }
+    }
+
+    // Determine label: emit when includeDefaults=true or when customised
+    const defLabel = def?.label ?? serviceId;
+    const serviceLabel = includeDefaults
+      ? group.label
+      : (group.label !== defLabel ? group.label : undefined);
+
+    const service: IacService = {
+      id: serviceId,
+      type: type as IacService['type'],
+      ...(serviceLabel !== undefined ? { label: serviceLabel } : {}),
+      ...(spec && Object.keys(spec).length > 0 ? { spec } : {}),
+      ...(deploy && hasDeployContent(deploy) ? { deploy } : {}),
+      ...(depMap.size > 0 ? { dependencies: Array.from(depMap.values()) } : {}),
+      ...(group.healingEnabled !== undefined ? { healing: { enabled: group.healingEnabled } } : {}),
+    };
+    services.push(service);
+
+    // Build deployment: classify each node by its placement
+    const zones: string[] = [];
+    const replicaSpecs: { zone?: string; region?: string }[] = [];
+    const regions: string[] = [];
+
+    for (const nodeId of group.nodeIds) {
+      const nodeCfg = nodeConfigs[nodeId] ?? {};
+      if (nodeCfg.zoneId) {
+        if (nodeCfg.dbRole === 'replica') {
+          replicaSpecs.push({ zone: nodeCfg.zoneId });
+        } else {
+          zones.push(nodeCfg.zoneId);
+        }
+      } else if (nodeCfg.regionId) {
+        regions.push(nodeCfg.regionId);
+      }
+    }
+
+    const deployment: IacDeployment = {
+      service: serviceId,
+      ...(zones.length > 0 ? { zones } : {}),
+      ...(regions.length > 0 ? { regions } : {}),
+      ...(replicaSpecs.length > 0 ? { replicas: replicaSpecs } : {}),
+    };
+    deployments.push(deployment);
+  }
+
+  return { services, deployments };
 }
 
 // ---------------------------------------------------------------------------

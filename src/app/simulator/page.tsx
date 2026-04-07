@@ -31,12 +31,13 @@ export default function SimulatorPage() {
 
   // IaC YAML lives in the store so it persists across open/close and is scoped
   // to the currently loaded architecture.
-  const nodes       = useArchitectureStore((s) => s.nodes);
-  const edges       = useArchitectureStore((s) => s.edges);
-  const nodeConfigs = useArchitectureStore((s) => s.nodeConfigs);
-  const edgeConfigs = useArchitectureStore((s) => s.edgeConfigs);
-  const iacYaml     = useArchitectureStore((s) => s.iacYaml);
-  const setIacYaml  = useArchitectureStore((s) => s.setIacYaml);
+  const nodes         = useArchitectureStore((s) => s.nodes);
+  const edges         = useArchitectureStore((s) => s.edges);
+  const nodeConfigs   = useArchitectureStore((s) => s.nodeConfigs);
+  const edgeConfigs   = useArchitectureStore((s) => s.edgeConfigs);
+  const serviceGroups = useArchitectureStore((s) => s.serviceGroups);
+  const iacYaml       = useArchitectureStore((s) => s.iacYaml);
+  const setIacYaml    = useArchitectureStore((s) => s.setIacYaml);
 
   // Canvas → IaC auto-sync (debounced 300 ms to absorb rapid drag events).
   // Runs on every topology change and regenerates the full YAML with all
@@ -50,7 +51,7 @@ export default function SimulatorPage() {
         return;
       }
       const doc = fromTopology(
-        { nodes, edges, nodeConfigs, edgeConfigs },
+        { nodes, edges, nodeConfigs, edgeConfigs, serviceGroups },
         { name: 'current-topology', includeDefaults: true },
       );
       setIacYaml(toYaml(doc));
@@ -58,7 +59,7 @@ export default function SimulatorPage() {
     return () => {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
-  }, [nodes, edges, nodeConfigs, edgeConfigs, setIacYaml]);
+  }, [nodes, edges, nodeConfigs, edgeConfigs, serviceGroups, setIacYaml]);
 
   return (
     <ReactFlowProvider>

@@ -24,6 +24,8 @@ export function normalizeDocument(doc: IacDocument): IacDocument {
     regions: doc.regions?.length ? doc.regions : undefined,
     resources: doc.resources.map(normalizeResource),
     connections: doc.connections?.length ? doc.connections : undefined,
+    services: doc.services?.length ? doc.services : undefined,
+    deployments: doc.deployments?.length ? doc.deployments : undefined,
     scenarios: doc.scenarios?.length ? doc.scenarios : undefined,
   };
 }

@@ -1,6 +1,9 @@
 import type { Node, Edge } from 'reactflow';
 import type { ArchitectureTemplate, NodeConfig, EdgeConfig } from '@/types';
 import { COMPONENT_BY_TYPE, DEFAULT_EDGE_CONFIG } from '@/constants/components';
+import { parseDocument } from '@/iac/parser';
+import { toTopology } from '@/iac/toTopology';
+import { SERVICE_DEPLOYMENT_ACTIVE_ACTIVE_STARTER } from '@/iac/starters';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -22,6 +25,22 @@ function makeConfig(type: string, overrides: Partial<NodeConfig> = {}): NodeConf
 
 function edgeConfigs(edges: Edge[]): Record<string, EdgeConfig> {
   return Object.fromEntries(edges.map((e) => [e.id, { ...DEFAULT_EDGE_CONFIG }]));
+}
+
+function buildFromIacYaml(yamlText: string): ArchitectureTemplate {
+  const parsed = parseDocument(yamlText);
+  if (!parsed.ok) {
+    console.error('Failed to parse embedded IaC architecture example', parsed.issues);
+    return {
+      nodes: [],
+      edges: [],
+      nodeConfigs: {},
+      edgeConfigs: {},
+      serviceGroups: {},
+    };
+  }
+
+  return toTopology(parsed.document);
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +190,14 @@ function buildIacStarterExample(): ArchitectureTemplate {
     nodeConfigs: {},
     edgeConfigs: {},
   };
+}
+
+// ---------------------------------------------------------------------------
+// 5b. Service + Deployment Active-Active (IaC)
+// ---------------------------------------------------------------------------
+
+function buildServiceDeploymentActiveActive(): ArchitectureTemplate {
+  return buildFromIacYaml(SERVICE_DEPLOYMENT_ACTIVE_ACTIVE_STARTER);
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,6 +1230,15 @@ export const ARCHITECTURE_LIBRARY: ArchitectureEntry[] = [
     difficulty: 'beginner',
     tags: ['IaC', 'YAML', 'Terraform-like', 'Import'],
     template: buildIacStarterExample(),
+  },
+  {
+    id: 'service-deployment-active-active',
+    name: 'Service + Deployment Active-Active',
+    description: 'A prebuilt multi-region checkout platform authored with `services[]` + `deployments[]`. It fans API gateways, app replicas, queues, workers, cache, and database replicas across east and west regions.',
+    category: 'IaC Examples',
+    difficulty: 'advanced',
+    tags: ['IaC', 'Service', 'Deployment', 'Multi-Region', 'Active-Active', 'Autoscaling'],
+    template: buildServiceDeploymentActiveActive(),
   },
   {
     id: 'cached-web-app',

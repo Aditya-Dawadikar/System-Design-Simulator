@@ -6,7 +6,7 @@ import { parseDocument } from '@/iac/parser';
 import { validateDocument, hasErrors } from '@/iac/validate';
 import { toTopology } from '@/iac/toTopology';
 import { fromTopology, toYaml } from '@/iac/fromTopology';
-import { THREE_TIER_STARTER } from '@/iac/starters';
+import { SERVICE_DEPLOYMENT_STARTER, THREE_TIER_STARTER } from '@/iac/starters';
 import type { ValidationIssue } from '@/iac/schema';
 
 // ---------------------------------------------------------------------------
@@ -30,11 +30,12 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
   const [status, setStatus] = useState<Status>('idle');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const nodes        = useArchitectureStore((s) => s.nodes);
-  const edges        = useArchitectureStore((s) => s.edges);
-  const nodeConfigs  = useArchitectureStore((s) => s.nodeConfigs);
-  const edgeConfigs  = useArchitectureStore((s) => s.edgeConfigs);
-  const loadTopology = useArchitectureStore((s) => s.loadTopology);
+  const nodes         = useArchitectureStore((s) => s.nodes);
+  const edges         = useArchitectureStore((s) => s.edges);
+  const nodeConfigs   = useArchitectureStore((s) => s.nodeConfigs);
+  const edgeConfigs   = useArchitectureStore((s) => s.edgeConfigs);
+  const serviceGroups = useArchitectureStore((s) => s.serviceGroups);
+  const loadTopology  = useArchitectureStore((s) => s.loadTopology);
 
   // Close on Escape
   useEffect(() => {
@@ -89,7 +90,7 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
 
   function handleExport() {
     const doc = fromTopology(
-      { nodes, edges, nodeConfigs, edgeConfigs },
+      { nodes, edges, nodeConfigs, edgeConfigs, serviceGroups },
       { name: 'exported-topology' },
     );
     onYamlChange(toYaml(doc));
@@ -97,12 +98,20 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
     setStatus('idle');
   }
 
-  function handleLoadStarter() {
+  function loadStarterTemplate(template: string) {
     // Puts the starter template in the editor for the user to review/edit.
     // The canvas is left unchanged; click APPLY to load the template.
-    onYamlChange(THREE_TIER_STARTER);
+    onYamlChange(template);
     setIssues([]);
     setStatus('idle');
+  }
+
+  function handleLoadStarter() {
+    loadStarterTemplate(THREE_TIER_STARTER);
+  }
+
+  function handleLoadServiceDeploymentStarter() {
+    loadStarterTemplate(SERVICE_DEPLOYMENT_STARTER);
   }
 
   // ---------------------------------------------------------------------------
@@ -199,7 +208,14 @@ export default function IacEditorDrawer({ yamlText, onYamlChange, onClose }: Pro
             label="STARTER"
             onClick={handleLoadStarter}
             color="var(--text-dim)"
-            title="Load three-tier starter template into editor (click APPLY to apply)"
+            title="Load the classic three-tier starter into the editor (click APPLY to apply)"
+          />
+
+          <ToolbarButton
+            label="SVC+DEPLOY"
+            onClick={handleLoadServiceDeploymentStarter}
+            color="var(--accent-purple)"
+            title="Load a starter that uses services[] + deployments[] blocks"
           />
 
           <div style={{ width: 1, height: 18, background: 'var(--border)' }} />

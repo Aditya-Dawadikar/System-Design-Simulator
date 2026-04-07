@@ -153,6 +153,66 @@ export const IacScenarioSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// Service / Deployment schemas
+// ---------------------------------------------------------------------------
+
+/** One edge-type dependency declared on a service (→ IaC connections between service replicas). */
+export const IacServiceDependencySchema = z.object({
+  service: z.string().min(1),
+  protocol: z.enum(EDGE_PROTOCOLS).optional(),
+  splitPct: z.number().min(0).max(100).optional(),
+  readSplitPct: z.number().min(0).max(100).optional(),
+  writeSplitPct: z.number().min(0).max(100).optional(),
+});
+
+/** Healing policy for a service — stored in NodeConfig; engine integration is future work. */
+export const IacHealingPolicySchema = z.object({
+  enabled: z.boolean(),
+  restartPolicy: z.enum(['always', 'on-failure', 'never']).optional(),
+});
+
+/**
+ * A logical service definition.  Each service is a named, typed unit whose
+ * config (spec / deploy / autoscaling) is shared across every replica created
+ * by a matching deployment entry.
+ */
+export const IacServiceSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(COMPONENT_TYPES, { error: 'Unknown component type' }),
+  label: z.string().optional(),
+  /** Config fields for non-compute types (maps directly to NodeConfig). */
+  spec: z.record(z.string(), z.unknown()).optional(),
+  /** Runtime/deployment fields for compute types (app_server, worker_pool, cloud_function). */
+  deploy: IacDeploySchema.optional(),
+  /** Other services this service depends on (creates edges between their replicas). */
+  dependencies: z.array(IacServiceDependencySchema).optional(),
+  /** Auto-healing configuration (stored; simulation engine integration is future). */
+  healing: IacHealingPolicySchema.optional(),
+});
+
+/** One replica placement — used in the `replicas[]` array of a deployment. */
+export const IacReplicaSpecSchema = z.object({
+  zone: z.string().optional(),
+  region: z.string().optional(),
+});
+
+/**
+ * A deployment instantiates a service across one or more zones / regions.
+ * Each zone/region entry produces exactly one canvas node with ID `{serviceId}-{zoneId}`.
+ * `replicas[]` supports the database primary/replica pattern: primary comes from
+ * `zones[]`; replicas come from `replicas[]`.
+ */
+export const IacDeploymentSchema = z.object({
+  service: z.string().min(1),
+  /** Zones to deploy to (for zonal component types: app_server, cache, database, …). */
+  zones: z.array(z.string().min(1)).optional(),
+  /** Regions to deploy to (for regional component types: load_balancer, pubsub, …). */
+  regions: z.array(z.string().min(1)).optional(),
+  /** Database replica zones — each creates a replica node pointing to the first zones[] entry. */
+  replicas: z.array(IacReplicaSpecSchema).optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Root document schema
 // ---------------------------------------------------------------------------
 
@@ -162,8 +222,13 @@ export const IacDocumentSchema = z.object({
   description: z.string().optional(),
   globals: IacGlobalsSchema.optional(),
   regions: z.array(IacRegionSchema).optional(),
-  resources: z.array(IacResourceSchema),
+  /** Standalone resources (original DSL).  Defaults to [] so service-only YAMLs can omit this key. */
+  resources: z.array(IacResourceSchema).default([]),
   connections: z.array(IacConnectionSchema).optional(),
+  /** Logical service definitions (K8s-style abstraction). */
+  services: z.array(IacServiceSchema).optional(),
+  /** Deployment instantiations — each entry maps a service to zones / regions / replicas. */
+  deployments: z.array(IacDeploymentSchema).optional(),
   scenarios: z.array(IacScenarioSchema).optional(),
 });
 
@@ -181,6 +246,12 @@ export type IacDeploy = z.infer<typeof IacDeploySchema>;
 export type IacAutoscaling = z.infer<typeof IacAutoscalingSchema>;
 export type IacGlobals = z.infer<typeof IacGlobalsSchema>;
 export type IacScenario = z.infer<typeof IacScenarioSchema>;
+// Service / Deployment types
+export type IacService = z.infer<typeof IacServiceSchema>;
+export type IacDeployment = z.infer<typeof IacDeploymentSchema>;
+export type IacServiceDependency = z.infer<typeof IacServiceDependencySchema>;
+export type IacHealingPolicy = z.infer<typeof IacHealingPolicySchema>;
+export type IacReplicaSpec = z.infer<typeof IacReplicaSpecSchema>;
 
 // ---------------------------------------------------------------------------
 // ValidationIssue — shared result type for validate.ts
